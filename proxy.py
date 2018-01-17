@@ -95,7 +95,7 @@ class LineBufferingSocketContainer:
       while len(self.__b_send_buffer) > 0 and self.linesep in self.__b_send_buffer:
          try:
             t = self.__b_send_buffer.index(self.linesep)
-            n_bytes = self.socket.write(self.__b_send_buffer[:t+1])
+            n_bytes = self.socket.send(self.__b_send_buffer[:t+1])
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
          except BlockingIOError:
             break
@@ -109,7 +109,7 @@ class LineBufferingSocketContainer:
       try:
          data = b''
          while True:
-            data = self.socket.read(RECV_MAX)
+            data = self.socket.recv(RECV_MAX)
             self.__b_recv_buffer += data
             if len(data) < RECV_MAX:
                # May need to watch out for len(data)==0 which might mean the remote side
@@ -129,7 +129,7 @@ class LineBufferingSocketContainer:
 
       while self.linesep in self.__b_recv_buffer:
          t = self.__b_recv_buffer.index(self.linesep)
-         q += TextLine(self.__b_recv_buffer[:t+1], self.encoding)
+         q += [TextLine(self.__b_recv_buffer[:t+1], self.encoding)]
          self.__b_recv_buffer = self.__b_recv_buffer[t+1:]
 
       return (q, has_eof)
@@ -194,10 +194,41 @@ def run():
 
 
 if __name__ == '__main__':
-   # (...read configuration, set things up, etcetera...)
-   x = LineBufferingSocketContainer()
-   x.connected = True
-   x.write("Hello world")
-   x.write("\nthis is a test\npartial line")
-   x.write("\n")
-   # run()
+   try:
+      def do_accept(socket, mask):
+         connection, address = socket.accept() # and hope it works
+         print("Accepting " + repr(connection) + " from " + repr(address) + " (mask="+repr(mask)+").")
+         connections[connection] = LineBufferingSocketContainer(connection)
+         sel.register(connection, selectors.EVENT_READ, do_read)
+
+      def do_read(socket, mask):
+         if socket in connections:
+            (lines, eof) = connections[socket].read()
+
+            if eof:
+               print("Got an EOF.")
+               connections[socket].handle_disconnect()
+               socket.close()
+               sel.unregister(socket)
+               del connections[socket]
+
+            for line in lines:
+               for s in connections:
+                  connections[s].write_line(line)
+
+      server = socket.socket()
+      server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+      server.bind(("localhost", 1234))
+      server.listen(100)
+      server.setblocking(False)
+      sel.register(server, selectors.EVENT_READ, do_accept)
+
+      while True:
+         events = sel.select()
+         for key, mask in events:
+            callback = key.data
+            callback(key.fileobj, mask)
+
+   except KeyboardInterrupt:
+      print(repr(connections))
+      print("Exiting uncleanly. Bye...")
