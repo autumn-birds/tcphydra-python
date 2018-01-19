@@ -6,6 +6,7 @@
 #  - actually understand the underlying protocols (Telnet, etc.) to keep clients from
 #    getting into inconsistent states
 
+import sys
 import threading
 import socket
 import selectors
@@ -54,6 +55,8 @@ class TextLine:
 
             r = r[e.end:]
 
+      return s
+
    def as_bytes(self):
       return self.__raw
 
@@ -73,7 +76,7 @@ class LineBufferingSocketContainer:
       if socket != None:
          self.attach_socket(socket)
 
-   def write_str(self):
+   def write_str(self, data):
       assert type(data) == str
 
       self.__b_send_buffer += data.encode(self.encoding)
@@ -152,7 +155,7 @@ class LineBufferingSocketContainer:
 
 class RemoteServer(LineBufferingSocketContainer):
    def __init__(self, host, port):
-      super().__init__(self)
+      super().__init__()
 
       assert type(host) == str
       assert type(port) == int
@@ -195,7 +198,7 @@ class RemoteServer(LineBufferingSocketContainer):
 
 class LocalClient(LineBufferingSocketContainer):
    def __init__(self, socket):
-      super().__init__(self)
+      super().__init__()
 
       self.attach_socket(socket)
       self.subscribedTo = None
@@ -217,7 +220,7 @@ class LocalClient(LineBufferingSocketContainer):
          self.tell_err("Remote server not connected.")
 
    def handle_disconnect(self):
-      super().handle_disconnect(self)
+      super().handle_disconnect()
 
       if self.subscribedTo != None:
          self.subscribedTo.unsubscribe(self)
@@ -228,7 +231,7 @@ LOCK = threading.Lock()
 servers = {}
 server_sockets = {}
 
-def handle_line_server(line, socket):
+def handle_line_server(socket, line):
    server_sockets[socket].handle_data(line)
    return False # don't continue trying states
 
@@ -295,7 +298,7 @@ def start_connection(server):
 clients = {}
 client_commands = {}
 
-def handle_line_client(line, socket):
+def handle_line_client(socket, line):
    s = line.as_str().replace('\r\n', '').replace('\n', '')
    c = clients[socket]
 
@@ -359,8 +362,9 @@ def run():
       def do_accept(socket, mask):
          connection, address = socket.accept() # and hope it works
          print("Accepting " + repr(connection) + " from " + repr(address) + " (mask="+repr(mask)+").")
-         connections[connection] = LineBufferingSocketContainer(connection)
-         sel.register(connection, selectors.EVENT_READ, do_read)
+         clients[connection] = LocalClient(connection)
+         print(repr(clients[connection]))
+         sel.register(connection, selectors.EVENT_READ)
 
 #     def do_read(socket, mask):
 #        if socket in connections:
@@ -382,21 +386,46 @@ def run():
       server.bind(("localhost", 1234))
       server.listen(100)
       server.setblocking(False)
-      sel.register(server, selectors.EVENT_READ, do_accept)
+      sel.register(server, selectors.EVENT_READ)
 
       while True:
          LOCK.acquire()
          events = sel.select(timeout = 1)
          for key, mask in events:
             s = key.fileobj
-            if key == server:
+            if s == server:
                do_accept(s, mask)
             else:
-               lines = s.read()
+               ss = None
+               # The `states' data structure design doesn't make a lot of sense.
+               # After all, there can only ever be one buffered-socket-abstraction per
+               # actual socket. But we're storing that same abstraction in, potentially,
+               # multiple places.
+               # Would it make more sense to store the abstraction (LocalClient, server,
+               # or whatever) in the selector's data field?
+               for state in states:
+                  if s in state[0]:
+                     ss = state[0][s]
+                     break
+
+               if ss == None:
+                  print("NOTE: Read on unregistered socket")
+                  break
+
+               (lines, eof) = ss.read()
+               print(repr(lines))
+
+               if eof:
+                  sel.unregister(s)
+                  ss.handle_disconnect()
+                  for state in states:
+                     if s in state[0]:
+                        del state[0][s]
+
                for line in lines:
                   for state in states:
                      if s in state[0]:
-                        result = state[1](s, lines)
+                        result = state[1](s, line)
                         if result:
                            break # to next line
          LOCK.release()
@@ -410,6 +439,9 @@ def run():
 
 
 if __name__ == '__main__':
+   run()
+
+if False:
    try:
       def do_accept(socket, mask):
          connection, address = socket.accept() # and hope it works
