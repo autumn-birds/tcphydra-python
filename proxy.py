@@ -422,8 +422,8 @@ def run():
       sel.register(server, selectors.EVENT_READ)
 
       while True:
-         LOCK.acquire()
          events = sel.select(timeout = 1)
+         LOCK.acquire()
          for key, mask in events:
             s = key.fileobj
             if s == server:
