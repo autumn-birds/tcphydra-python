@@ -36,8 +36,6 @@ class TextLine:
       else:
          self.__raw = string.encode(encoding)
 
-      print("TextLine <= {}".format(repr(self.__raw)))
-
    def as_str(self):
       """Try to 'safely', but lossily, decode the raw line into an ordinary string,
       according to the encoding given."""
@@ -135,14 +133,56 @@ class LineBufferingSocketContainer:
 
       q = []
 
+      # Telnet codes are a problem.  TODO: Improve this super hacky solution, which just involves
+      # ... completely removing them from the input stream (except for IAC IAC / 255 255.)
+
+      stripped = b''
+
+      IAC = 255
+      DONT = 254
+      DO = 253
+      WONT = 252
+      WILL = 251
+
+      in_command = False
+
+      # Speaking of awful hacks, this is probably not very efficient at all:
+
+      x = 0
+      while x < len(self.__b_recv_buffer):
+         if in_command:
+            if self.__b_recv_buffer[x] == IAC:
+               stripped += bytes([IAC])
+               in_command = False
+            elif self.__b_recv_buffer[x] <= DONT and self.__b_recv_buffer[x] >= WILL:
+               pass
+            else:
+               in_command = False
+         else:
+            if self.__b_recv_buffer[x] == IAC:
+               in_command = True
+            else:
+               stripped += self.__b_recv_buffer[x:x+1]
+         x += 1
+
       # The best we can do for a record separator in this case is a byte or byte sequence that
       # means 'newline'. We go with one byte for now for simplicity & because it works with
       # UTF-8/ASCII at least, which comprises most things we're interested in.
 
-      while self.linesep in self.__b_recv_buffer:
-         t = self.__b_recv_buffer.index(self.linesep)
-         q += [TextLine(self.__b_recv_buffer[:t+1], self.encoding)]
-         self.__b_recv_buffer = self.__b_recv_buffer[t+1:]
+      while self.linesep in stripped:
+         t = stripped.index(self.linesep)
+         q += [TextLine(stripped[:t+1], self.encoding)]
+         stripped = stripped[t+1:]
+
+      self.__b_recv_buffer = stripped
+
+      # Make sure it starts in in_command mode again next time around in case the read() call
+      # left us in the middle of a command, which I don't think is *likely* but could happen.
+      # (The rest of the command will get tacked on after the IAC, which will ensure
+      # the thing goes back into command mode immediately prior.)
+
+      if in_command:
+         self.__b_send_buffer += bytes([IAC])
 
       return (q, has_eof)
 
