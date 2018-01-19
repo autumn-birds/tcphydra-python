@@ -172,7 +172,7 @@ class RemoteServer(LineBufferingSocketContainer):
          sub.write_line(data)
 
    def handle_disconnect(self):
-      super().handle_disconnect(self)
+      super().handle_disconnect()
       for sub in self.subscribers:
          sub.tell_err("Remote server closed connection.")
 
@@ -394,9 +394,13 @@ def run():
          cfg = json.load(f)
    except FileNotFoundError:
       print("Configuration file `"+CONFIG_FILE+"' not found.  Please create it and try again.")
+      return
+
 
    for name, proto in cfg['servers'].items(): # (k, v)
       servers[name] = RemoteServer(proto['host'], proto['port'])
+      if 'encoding' in proto:
+         servers[name].encoding = proto['encoding']
 
 
    try:
