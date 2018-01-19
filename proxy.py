@@ -36,6 +36,8 @@ class TextLine:
       else:
          self.__raw = string.encode(encoding)
 
+      print("TextLine <= {}".format(repr(self.__raw)))
+
    def as_str(self):
       """Try to 'safely', but lossily, decode the raw line into an ordinary string,
       according to the encoding given."""
@@ -50,7 +52,6 @@ class TextLine:
             s += r[:e.start].decode(self.__enc)
 
             for byte in r[e.start:e.end]:
-               print(byte)
                s += '?(' + str(byte) + ')'
 
             r = r[e.end:]
@@ -128,6 +129,7 @@ class LineBufferingSocketContainer:
                   has_eof = True
                break
             data = b''
+
       except BlockingIOError:
          pass
 
@@ -246,7 +248,7 @@ server_sockets = []
 def handle_line_server(socket, line):
    assert socket in server_sockets
 
-   print("SERVER: "+line.as_str())
+   #print("SERVER: {}".format(line.as_str()))
    socket_wrappers[socket].handle_data(line)
    return False # don't continue trying states
 
@@ -286,11 +288,11 @@ def do_start_connection(server):
       server.warn_all("Connection attempt failed: Connection refused")
 
    except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
-      server.warn_all("Connection attempt failed: " + repr(err))
+      server.warn_all("Connection attempt failed: {}".format(repr(err)))
 
    except:
       kind, value, traceback = sys.exc_info()
-      server.warn_all("Connection attempt failed: " + repr(value))
+      server.warn_all("Connection attempt failed: {}".format(repr(value)))
       print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + repr(traceback))
 
    finally:
@@ -332,11 +334,11 @@ def handle_line_client(socket, line):
          if cmd in client_commands:
             client_commands[cmd](args, c)
          else:
-            c.tell_err("Command `"+cmd+"' not found.")
+            c.tell_err("Command `{}' not found.".format(cmd))
 
       except:
          kind, value, traceback = sys.exc_info()
-         c.tell_err("Error during command processing: " + repr(value))
+         c.tell_err("Error during command processing: {}".format(repr(value)))
          print("COMMAND PROCESSING ERROR\n========================\n\n" + repr(traceback))
 
    else:
@@ -352,10 +354,10 @@ def do_client_join(args, client):
       client.unsubscribe()
       servers[args].subscribe(client)
       client.subscribe(servers[args])
-      client.tell_ok("Subscribed to server `"+args+"'.")
+      client.tell_ok("Subscribed to server `{}'.".format(args))
       return True
    else:
-      client.tell_err("No such server `"+args+"'.")
+      client.tell_err("No such server `{}'.".format(args))
       return False
 
 client_commands["j"] = do_client_join
@@ -393,7 +395,7 @@ def run():
       with open(CONFIG_FILE, 'r') as f:
          cfg = json.load(f)
    except FileNotFoundError:
-      print("Configuration file `"+CONFIG_FILE+"' not found.  Please create it and try again.")
+      print("Configuration file `{}' not found.  Please create it and try again.".format(CONFIG_FILE))
       return
 
 
@@ -408,7 +410,7 @@ def run():
          global client_sockets
 
          connection, address = socket.accept() # and hope it works
-         print("Accepting " + repr(connection) + " from " + repr(address) + " (mask="+repr(mask)+").")
+         print("Accepting {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
          socket_wrappers[connection] = LocalClient(connection)
          client_sockets += [connection]
          print(repr(socket_wrappers[connection]))
@@ -436,10 +438,10 @@ def run():
 
                if ss == None:
                   print("NOTE: Read on unregistered socket")
+                  # Almost certainly causes an infinite loop. Should consider raising an error.
                   break
 
                (lines, eof) = ss.read()
-               print(repr(lines))
 
                if eof:
                   sel.unregister(s)
