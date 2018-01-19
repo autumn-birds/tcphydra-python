@@ -3,13 +3,17 @@
 # 'Telnet' multiplexer for MUDs, etc. Python 3.
 
 # Things we should be doing someday:
-#  - actually understand the underlying protocols (Telnet, etc.) to keep clients from
-#    getting into inconsistent states
+#  - actually understand the underlying protocols (Telnet)
+#      - this turns out to be kind of necessary
 
 import sys
 import threading
 import socket
 import selectors
+import json
+
+
+CONFIG_FILE = 'config.json'
 
 
 ENCODING = 'utf-8'  # (default)
@@ -43,7 +47,6 @@ class TextLine:
             s += r.decode(self.__enc)
             r = ''
          except UnicodeDecodeError as e:
-            print("Decoding, hit bad spot: " + repr(e))
             s += r[:e.start].decode(self.__enc)
 
             for byte in r[e.start:e.end]:
@@ -52,7 +55,6 @@ class TextLine:
 
             r = r[e.end:]
 
-      print("return "+repr(s))
       return s
 
    def as_bytes(self):
@@ -387,7 +389,15 @@ states = [(server_sockets, handle_line_server),
 
 
 def run():
-   servers["local"] = RemoteServer("localhost", 4000)
+   try:
+      with open(CONFIG_FILE, 'r') as f:
+         cfg = json.load(f)
+   except FileNotFoundError:
+      print("Configuration file `"+CONFIG_FILE+"' not found.  Please create it and try again.")
+
+   for name, proto in cfg['servers'].items(): # (k, v)
+      servers[name] = RemoteServer(proto['host'], proto['port'])
+
 
    try:
       def do_accept(socket, mask):
@@ -445,7 +455,6 @@ def run():
          LOCK.release()
 
    except KeyboardInterrupt:
-      print(repr(connections))
       print("Exiting uncleanly. Bye...")
 
 
