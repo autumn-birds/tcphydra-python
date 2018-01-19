@@ -22,11 +22,6 @@ MESSAGE_PREFIX_ERR = '!! '
 RECV_MAX = 4096 # bytes
 
 
-sel = selectors.DefaultSelector()
-servers = {}             # index of available servers by display name
-connections = {}         # index of currently connected server & client objects by socket
-
-
 class TextLine:
    def __init__(self, string, encoding):
       assert type(string) == bytes or type(string) == str
@@ -48,13 +43,16 @@ class TextLine:
             s += r.decode(self.__enc)
             r = ''
          except UnicodeDecodeError as e:
+            print("Decoding, hit bad spot: " + repr(e))
             s += r[:e.start].decode(self.__enc)
 
-            for byte in self.__enc[e.start:e.end]:
-               s += '?(' + __repr__(byte) + ')'
+            for byte in r[e.start:e.end]:
+               print(byte)
+               s += '?(' + str(byte) + ')'
 
             r = r[e.end:]
 
+      print("return "+repr(s))
       return s
 
    def as_bytes(self):
@@ -107,6 +105,7 @@ class LineBufferingSocketContainer:
             n_bytes = self.socket.send(self.__b_send_buffer[:t+1])
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
          except BlockingIOError:
+            print("BlockingIOError")
             break
 
    def read(self):
@@ -168,7 +167,7 @@ class RemoteServer(LineBufferingSocketContainer):
 
    def handle_data(self, data):
       for sub in self.subscribers:
-         sub.write(data)
+         sub.write_line(data)
 
    def handle_disconnect(self):
       super().handle_disconnect(self)
@@ -213,9 +212,17 @@ class LocalClient(LineBufferingSocketContainer):
       if type(self.subscribedTo) == RemoteServer:
          self.subscribedTo.unsubscribe(self)
 
+   def subscribe(self, other):
+      assert type(other) == RemoteServer
+      self.subscribedTo = other
+
    def handle_data(self, data):
-      if self.subscribedTo != None and self.subscribedTo.connected:
-         self.subscribedTo.write(data)
+      if self.subscribedTo == None:
+         self.tell_err("Not subscribedTo anything.")
+         return
+
+      if self.subscribedTo.connected:
+         self.subscribedTo.write_line(data)
       else:
          self.tell_err("Remote server not connected.")
 
@@ -227,12 +234,18 @@ class LocalClient(LineBufferingSocketContainer):
 
 
 LOCK = threading.Lock()
+sel = selectors.DefaultSelector()
+socket_wrappers = {}
 
-servers = {}
-server_sockets = {}
+
+servers = {}             # index of available servers by display name
+server_sockets = []
 
 def handle_line_server(socket, line):
-   server_sockets[socket].handle_data(line)
+   assert socket in server_sockets
+
+   print("SERVER: "+line.as_str())
+   socket_wrappers[socket].handle_data(line)
    return False # don't continue trying states
 
 def do_start_connection(server):
@@ -263,7 +276,8 @@ def do_start_connection(server):
 
       LOCK.acquire()
       server.attach_socket(C)
-      server_sockets[socket] = server
+      socket_wrappers[C] = server
+      server_sockets += [C]
       sel.register(C, selectors.EVENT_READ)
 
    except ConnectionRefusedError:
@@ -285,9 +299,9 @@ def do_start_connection(server):
 def start_connection(server):
    assert type(server) == RemoteServer
 
-   if not server.connecting_in_thread:
+   if not server.connecting_in_thread and not server.connected:
       server.connecting_in_thread = True
-      t_connect = threading.Thread(target = do_start_connection, args = (server))
+      t_connect = threading.Thread(target = do_start_connection, args = [server])
       t_connect.start()
       return True
 
@@ -295,12 +309,14 @@ def start_connection(server):
       return False
 
 
-clients = {}
+client_sockets = []
 client_commands = {}
 
 def handle_line_client(socket, line):
+   assert socket in client_sockets
+
    s = line.as_str().replace('\r\n', '').replace('\n', '')
-   c = clients[socket]
+   c = socket_wrappers[socket]
 
    if s[:len(COMMAND_PREFIX)] == COMMAND_PREFIX:
       try:
@@ -309,6 +325,7 @@ def handle_line_client(socket, line):
             args = s[s.index(' ')+1:]
          else:
             cmd = s[len(COMMAND_PREFIX):]
+            args = ''
 
          if cmd in client_commands:
             client_commands[cmd](args, c)
@@ -321,7 +338,7 @@ def handle_line_client(socket, line):
          print("COMMAND PROCESSING ERROR\n========================\n\n" + repr(traceback))
 
    else:
-      clients[socket].handle_data(line)
+      c.handle_data(line)
 
    return False # don't continue trying states
 
@@ -332,6 +349,7 @@ def do_client_join(args, client):
    if args in servers:
       client.unsubscribe()
       servers[args].subscribe(client)
+      client.subscribe(servers[args])
       client.tell_ok("Subscribed to server `"+args+"'.")
       return True
    else:
@@ -351,35 +369,36 @@ def do_client_connect(args, client):
 
 client_commands["J"] = do_client_connect
 
+def do_client_debug(args, client):
+   assert type(client) == LocalClient
+
+   try:
+      client.tell_ok(repr(eval(args)))
+   except:
+      kind, value, traceback = sys.exc_info()
+      client.tell_err(repr(value))
+
+client_commands["e"] = do_client_debug
+
 
 states = [(server_sockets, handle_line_server),
           #(preauth, handle_line_preauth),
-          (clients, handle_line_client)]
+          (client_sockets, handle_line_client)]
 
 
 def run():
+   servers["local"] = RemoteServer("localhost", 4000)
+
    try:
       def do_accept(socket, mask):
+         global client_sockets
+
          connection, address = socket.accept() # and hope it works
          print("Accepting " + repr(connection) + " from " + repr(address) + " (mask="+repr(mask)+").")
-         clients[connection] = LocalClient(connection)
-         print(repr(clients[connection]))
+         socket_wrappers[connection] = LocalClient(connection)
+         client_sockets += [connection]
+         print(repr(socket_wrappers[connection]))
          sel.register(connection, selectors.EVENT_READ)
-
-#     def do_read(socket, mask):
-#        if socket in connections:
-#           (lines, eof) = connections[socket].read()
-
-#           if eof:
-#              print("Got an EOF.")
-#              connections[socket].handle_disconnect()
-#              socket.close()
-#              sel.unregister(socket)
-#              del connections[socket]
-
-#           for line in lines:
-#              for s in connections:
-#                 connections[s].write_line(line)
 
       server = socket.socket()
       server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -396,17 +415,10 @@ def run():
             if s == server:
                do_accept(s, mask)
             else:
-               ss = None
-               # The `states' data structure design doesn't make a lot of sense.
-               # After all, there can only ever be one buffered-socket-abstraction per
-               # actual socket. But we're storing that same abstraction in, potentially,
-               # multiple places.
-               # Would it make more sense to store the abstraction (LocalClient, server,
-               # or whatever) in the selector's data field?
-               for state in states:
-                  if s in state[0]:
-                     ss = state[0][s]
-                     break
+               if s in socket_wrappers:
+                  ss = socket_wrappers[s]
+               else:
+                  ss = None
 
                if ss == None:
                   print("NOTE: Read on unregistered socket")
@@ -420,7 +432,9 @@ def run():
                   ss.handle_disconnect()
                   for state in states:
                      if s in state[0]:
-                        del state[0][s]
+                        del state[0][state[0].index(s)]
+                  if s in socket_wrappers:
+                     del socket_wrappers[s]
 
                for line in lines:
                   for state in states:
@@ -430,9 +444,6 @@ def run():
                            break # to next line
          LOCK.release()
 
-            #callback = key.data
-            #callback(key.fileobj, mask)
-
    except KeyboardInterrupt:
       print(repr(connections))
       print("Exiting uncleanly. Bye...")
@@ -440,43 +451,3 @@ def run():
 
 if __name__ == '__main__':
    run()
-
-if False:
-   try:
-      def do_accept(socket, mask):
-         connection, address = socket.accept() # and hope it works
-         print("Accepting " + repr(connection) + " from " + repr(address) + " (mask="+repr(mask)+").")
-         connections[connection] = LineBufferingSocketContainer(connection)
-         sel.register(connection, selectors.EVENT_READ, do_read)
-
-      def do_read(socket, mask):
-         if socket in connections:
-            (lines, eof) = connections[socket].read()
-
-            if eof:
-               print("Got an EOF.")
-               connections[socket].handle_disconnect()
-               socket.close()
-               sel.unregister(socket)
-               del connections[socket]
-
-            for line in lines:
-               for s in connections:
-                  connections[s].write_line(line)
-
-      server = socket.socket()
-      server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-      server.bind(("localhost", 1234))
-      server.listen(100)
-      server.setblocking(False)
-      sel.register(server, selectors.EVENT_READ, do_accept)
-
-      while True:
-         events = sel.select()
-         for key, mask in events:
-            callback = key.data
-            callback(key.fileobj, mask)
-
-   except KeyboardInterrupt:
-      print(repr(connections))
-      print("Exiting uncleanly. Bye...")
