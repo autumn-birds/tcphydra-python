@@ -8,8 +8,11 @@
 
 import sys
 import threading
+
 import socket
+import ssl
 import selectors
+
 import json
 
 
@@ -105,7 +108,7 @@ class LineBufferingSocketContainer:
             t = self.__b_send_buffer.index(self.linesep)
             n_bytes = self.socket.send(self.__b_send_buffer[:t+1])
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
-         except BlockingIOError:
+         except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
             print("BlockingIOError")
             break
 
@@ -128,8 +131,11 @@ class LineBufferingSocketContainer:
                break
             data = b''
 
-      except BlockingIOError:
+      except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
          pass
+
+      except ConnectionResetError:
+         has_eof = True
 
       q = []
 
@@ -208,6 +214,7 @@ class RemoteServer(LineBufferingSocketContainer):
       self.subscribers = []
 
       self.connecting_in_thread = False
+      self.use_SSL = False
 
    def handle_data(self, data):
       for sub in self.subscribers:
@@ -280,6 +287,11 @@ class LocalClient(LineBufferingSocketContainer):
 LOCK = threading.Lock()
 sel = selectors.DefaultSelector()
 socket_wrappers = {}
+tls_ctx_remote = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+tls_ctx_local  = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+tls_ctx_remote.verify_mode = ssl.CERT_OPTIONAL
+tls_ctx_remote.check_hostname = False
+tls_ctx_local.load_cert_chain("ssl/cert.pem")
 
 
 servers = {}             # index of available servers by display name
@@ -316,9 +328,15 @@ def do_start_connection(server):
       assert server.socket == None
       assert not server.connected
 
+      rlock = False
+
       C = socket.create_connection((server.host, server.port))
 
+      if server.use_SSL:
+         C = tls_ctx_remote.wrap_socket(C)
+
       LOCK.acquire()
+      rlock = True
       server.attach_socket(C)
       socket_wrappers[C] = server
       server_sockets += [C]
@@ -327,17 +345,21 @@ def do_start_connection(server):
    except ConnectionRefusedError:
       server.warn_all("Connection attempt failed: Connection refused")
 
+   except ssl.SSLError as e:
+      server.warn_all("Connection attempt failed, SSL error: {}", repr(e))
+
    except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
-      server.warn_all("Connection attempt failed: {}".format(repr(err)))
+      server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
 
    except:
       kind, value, traceback = sys.exc_info()
-      server.warn_all("Connection attempt failed: {}".format(repr(value)))
+      server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
       print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + repr(traceback))
 
    finally:
       server.connecting_in_thread = False
-      LOCK.release()
+      if rlock:
+         LOCK.release()
       return
 
 def start_connection(server):
@@ -443,25 +465,45 @@ def run():
       servers[name] = RemoteServer(proto['host'], proto['port'])
       if 'encoding' in proto:
          servers[name].encoding = proto['encoding']
+      if 'ssl' in proto and proto['ssl'] is True:
+         servers[name].use_SSL = True
 
 
    try:
       def do_accept(socket, mask):
          global client_sockets
 
-         connection, address = socket.accept() # and hope it works
-         print("Accepting {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
+         print("Accepting new client...")
+
+         # When SSL is turned on, this can block waiting for the client to send an SSL handshake.
+         # Maybe consider running it in a thread, too?  (That's a lot of threading though.  And
+         # clients are more under our control than remote servers are.)
+         try:
+            connection, address = socket.accept() # and hope it works
+         except ssl.SSLError as e:
+            print("SSL error in do_accept(): {}".format(e))
+            return
+         except:
+            kind, val, traceback = sys.exc_info()
+            print("Error in do_accept(): {}".format(val))
+            return
+
+         print("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
          socket_wrappers[connection] = LocalClient(connection)
          client_sockets += [connection]
-         print(repr(socket_wrappers[connection]))
          sel.register(connection, selectors.EVENT_READ)
 
       server = socket.socket()
       server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-      server.bind(("localhost", 1234))
+      server.bind(("0.0.0.0", 1234))
+
+      server = tls_ctx_local.wrap_socket(server, server_side=True)
+
       server.listen(100)
       server.setblocking(False)
       sel.register(server, selectors.EVENT_READ)
+
+      print("Listening.")
 
       while True:
          events = sel.select(timeout = 1)
