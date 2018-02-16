@@ -6,6 +6,7 @@
 #  - actually understand the underlying protocols (Telnet)
 #      - this turns out to be kind of necessary
 
+
 import sys
 import threading
 
@@ -112,7 +113,7 @@ class LineBufferingSocketContainer:
             n_bytes = self.socket.send(self.__b_send_buffer[:t+1])
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
          except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
-            print("BlockingIOError")
+            print("Note: BlockingIOError in flush() call")
             break
 
    def read(self):
@@ -127,8 +128,9 @@ class LineBufferingSocketContainer:
             data = self.socket.recv(RECV_MAX)
             self.__b_recv_buffer += data
             if len(data) < RECV_MAX:
-               # May need to watch out for len(data)==0 which might mean the remote side
-               # closed the connection?
+               # If the length of data returned by a read() call is 0, that actually means the
+               # remote side closed the connection.  If there's actually no data to be read,
+               # you get a BlockingIOError or one of its SSL-based cousins instead.
                if len(data) == 0:
                   has_eof = True
                break
@@ -309,13 +311,9 @@ class Proxy:
                      #(preauth, handle_line_preauth),
                      (self.client_sockets, self.handle_line_client)]
 
-      # TODO: Make a register_command() function and move these to calls of that
-      # (should it be called in run()? That would make more sense in terms of source
-      # order -- add the core/default commands after they're defined -- but might
-      # not otherwise be the best place, I don't know)
-      self.client_commands["e"] = self.do_client_debug
-      self.client_commands["J"] = self.do_client_connect
-      self.client_commands["j"] = self.do_client_join
+      self.register_command("e", self.do_client_debug)
+      self.register_command("J", self.do_client_connect)
+      self.register_command("j", self.do_client_join)
 
       self.cfg = cfg
 
@@ -334,7 +332,7 @@ class Proxy:
       return False # don't continue trying states
 
    def do_start_connection(self, server):
-      print("Starting to connect.\n")
+      print("Starting to connect to server {}:{}.".format(server.host, server.port))
 
       # This will always be ran in a thread -- to prevent long-blocking connection
       # attempts from hanging the whole program (e.g., when a server is down,
@@ -347,8 +345,6 @@ class Proxy:
 
       # It would probably be better to try to figure out asynchronous connect() or
       # something eventually.
-
-      # Will also (probably?) want to handle starting SSL, if necessary, later.
 
       try:
          assert type(server) == RemoteServer
