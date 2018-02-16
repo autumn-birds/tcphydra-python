@@ -330,7 +330,6 @@ class Proxy:
    def handle_line_server(self, socket, line):
       assert socket in self.server_sockets
 
-      #print("SERVER: {}".format(line.as_str()))
       self.socket_wrappers[socket].handle_data(line)
       return False # don't continue trying states
 
