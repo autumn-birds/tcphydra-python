@@ -284,267 +284,281 @@ class LocalClient(LineBufferingSocketContainer):
          self.subscribedTo.unsubscribe(self)
 
 
-LOCK = threading.Lock()
-sel = selectors.DefaultSelector()
-socket_wrappers = {}
-tls_ctx_remote = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
-tls_ctx_local  = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
-tls_ctx_remote.verify_mode = ssl.CERT_OPTIONAL
-tls_ctx_remote.check_hostname = False
-tls_ctx_local.load_cert_chain("ssl/cert.pem")
+class Proxy:
+   def __init__(self, cfg):
+      self.LOCK = threading.Lock()
+      self.sel = selectors.DefaultSelector()
+      self.socket_wrappers = {}
 
+      self.tls_ctx_remote = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+      self.tls_ctx_local  = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
+      self.tls_ctx_remote.verify_mode = ssl.CERT_OPTIONAL
+      self.tls_ctx_remote.check_hostname = False
+      self.tls_ctx_local.load_cert_chain("ssl/cert.pem")
 
-servers = {}             # index of available servers by display name
-server_sockets = []
+      self.servers = {}             # index of available servers by display name
+      self.server_sockets = []
 
-def handle_line_server(socket, line):
-   assert socket in server_sockets
+      self.client_sockets = []
+      self.client_commands = {}
 
-   #print("SERVER: {}".format(line.as_str()))
-   socket_wrappers[socket].handle_data(line)
-   return False # don't continue trying states
+      self.states = [(self.server_sockets, self.handle_line_server),
+                     #(preauth, handle_line_preauth),
+                     (self.client_sockets, self.handle_line_client)]
 
-def do_start_connection(server):
-   global server_sockets
+      # TODO: Make a register_command() function and move these to calls of that
+      # (should it be called in run()? That would make more sense in terms of source
+      # order -- add the core/default commands after they're defined -- but might
+      # not otherwise be the best place, I don't know)
+      self.client_commands["e"] = self.do_client_debug
+      self.client_commands["J"] = self.do_client_connect
+      self.client_commands["j"] = self.do_client_join
 
-   print("Starting to connect.\n")
+      self.cfg = cfg
 
-   # This will always be ran in a thread -- to prevent long-blocking connection
-   # attempts from hanging the whole program (e.g., when a server is down,
-   # tinyfugue can spend quite a while waiting for a connection attempt to
-   # come through...)
+   ###
+   ### STATE: server
+   ###
 
-   # The main program will set connecting_in_thread synchronously *before*
-   # calling this thread, so we don't need to worry about accidental multiple
-   # connection attempts.
+   def handle_line_server(self, socket, line):
+      assert socket in self.server_sockets
 
-   # It would probably be better to try to figure out asynchronous connect() or
-   # something eventually.
+      #print("SERVER: {}".format(line.as_str()))
+      self.socket_wrappers[socket].handle_data(line)
+      return False # don't continue trying states
 
-   # Will also (probably?) want to handle starting SSL, if necessary, later.
+   def do_start_connection(self, server):
+      print("Starting to connect.\n")
 
-   try:
-      assert type(server) == RemoteServer
-      assert server.socket == None
-      assert not server.connected
+      # This will always be ran in a thread -- to prevent long-blocking connection
+      # attempts from hanging the whole program (e.g., when a server is down,
+      # tinyfugue can spend quite a while waiting for a connection attempt to
+      # come through...)
 
-      rlock = False
+      # The main program will set connecting_in_thread synchronously *before*
+      # calling this thread, so we don't need to worry about accidental multiple
+      # connection attempts.
 
-      C = socket.create_connection((server.host, server.port))
+      # It would probably be better to try to figure out asynchronous connect() or
+      # something eventually.
 
-      if server.use_SSL:
-         C = tls_ctx_remote.wrap_socket(C)
+      # Will also (probably?) want to handle starting SSL, if necessary, later.
 
-      LOCK.acquire()
-      rlock = True
-      server.attach_socket(C)
-      socket_wrappers[C] = server
-      server_sockets += [C]
-      sel.register(C, selectors.EVENT_READ)
-
-   except ConnectionRefusedError:
-      server.warn_all("Connection attempt failed: Connection refused")
-
-   except ssl.SSLError as e:
-      server.warn_all("Connection attempt failed, SSL error: {}", repr(e))
-
-   except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
-      server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
-
-   except:
-      kind, value, traceback = sys.exc_info()
-      server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
-      print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + repr(traceback))
-
-   finally:
-      server.connecting_in_thread = False
-      if rlock:
-         LOCK.release()
-      return
-
-def start_connection(server):
-   assert type(server) == RemoteServer
-
-   if not server.connecting_in_thread and not server.connected:
-      server.connecting_in_thread = True
-      t_connect = threading.Thread(target = do_start_connection, args = [server])
-      t_connect.start()
-      return True
-
-   else:
-      return False
-
-
-client_sockets = []
-client_commands = {}
-
-def handle_line_client(socket, line):
-   assert socket in client_sockets
-
-   s = line.as_str().replace('\r\n', '').replace('\n', '')
-   c = socket_wrappers[socket]
-
-   if s[:len(COMMAND_PREFIX)] == COMMAND_PREFIX:
       try:
-         if ' ' in s:
-            cmd = s[len(COMMAND_PREFIX):s.index(' ')]
-            args = s[s.index(' ')+1:]
-         else:
-            cmd = s[len(COMMAND_PREFIX):]
-            args = ''
+         assert type(server) == RemoteServer
+         assert server.socket == None
+         assert not server.connected
 
-         if cmd in client_commands:
-            client_commands[cmd](args, c)
-         else:
-            c.tell_err("Command `{}' not found.".format(cmd))
+         rlock = False
+
+         C = socket.create_connection((server.host, server.port))
+
+         if server.use_SSL:
+            C = self.tls_ctx_remote.wrap_socket(C)
+
+         self.LOCK.acquire()
+         rlock = True
+         server.attach_socket(C)
+         self.socket_wrappers[C] = server
+         self.server_sockets += [C]
+         self.sel.register(C, selectors.EVENT_READ)
+
+      except ConnectionRefusedError:
+         server.warn_all("Connection attempt failed: Connection refused")
+
+      except ssl.SSLError as e:
+         server.warn_all("Connection attempt failed, SSL error: {}", repr(e))
+
+      except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
+         server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
 
       except:
          kind, value, traceback = sys.exc_info()
-         c.tell_err("Error during command processing: {}".format(repr(value)))
-         print("COMMAND PROCESSING ERROR\n========================\n\n" + repr(traceback))
+         server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
+         print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + repr(traceback))
 
-   else:
-      c.handle_data(line)
+      finally:
+         server.connecting_in_thread = False
+         if rlock:
+            self.LOCK.release()
+         return
 
-   return False # don't continue trying states
+   def start_connection(self, server):
+      assert type(server) == RemoteServer
+
+      if not server.connecting_in_thread and not server.connected:
+         server.connecting_in_thread = True
+         t_connect = threading.Thread(target = self.do_start_connection, args = [server])
+         t_connect.start()
+         return True
+
+      else:
+         return False
+
+   ###
+   ### STATE: client
+   ###
+
+   def handle_line_client(self, socket, line):
+      assert socket in self.client_sockets
+
+      s = line.as_str().replace('\r\n', '').replace('\n', '')
+      c = self.socket_wrappers[socket]
+
+      if s[:len(COMMAND_PREFIX)] == COMMAND_PREFIX:
+         try:
+            if ' ' in s:
+               cmd = s[len(COMMAND_PREFIX):s.index(' ')]
+               args = s[s.index(' ')+1:]
+            else:
+               cmd = s[len(COMMAND_PREFIX):]
+               args = ''
+
+            if cmd in self.client_commands:
+               self.client_commands[cmd](args, c)
+            else:
+               c.tell_err("Command `{}' not found.".format(cmd))
+
+         except:
+            kind, value, traceback = sys.exc_info()
+            c.tell_err("Error during command processing: {}".format(repr(value)))
+            print("COMMAND PROCESSING ERROR\n========================\n\n" + repr(traceback))
+
+      else:
+         c.handle_data(line)
+
+      return False # don't continue trying states
+
+   def do_client_join(self, args, client):
+      assert type(client) == LocalClient
+
+      if args in self.servers:
+         client.unsubscribe()
+         self.servers[args].subscribe(client)
+         client.subscribe(self.servers[args])
+         client.tell_ok("Subscribed to server `{}'.".format(args))
+         return True
+      else:
+         client.tell_err("No such server `{}'.".format(args))
+         return False
+
+   def do_client_connect(self, args, client):
+      assert type(client) == LocalClient
+
+      if self.do_client_join(args, client):
+         self.start_connection(self.servers[args])
+         return True #(ish)
+      else:
+         return False
+
+   def do_client_debug(self, args, client):
+      assert type(client) == LocalClient
+
+      try:
+         client.tell_ok(repr(eval(args)))
+      except:
+         kind, value, traceback = sys.exc_info()
+         client.tell_err(repr(value))
+
+   ###
+   ### MAIN LOOP
+   ###
+
+   def run(self):
+      for name, proto in self.cfg['servers'].items(): # (k, v)
+         self.servers[name] = RemoteServer(proto['host'], proto['port'])
+         if 'encoding' in proto:
+            self.servers[name].encoding = proto['encoding']
+         if 'ssl' in proto and proto['ssl'] is True:
+            self.servers[name].use_SSL = True
+
+      try:
+         def do_accept(socket, mask):
+            print("Accepting new client...")
+
+            # When SSL is turned on, this can block waiting for the client to send an SSL handshake.
+            # Maybe consider running it in a thread, too?  (That's a lot of threading though.  And
+            # clients are more under our control than remote servers are.)
+            try:
+               connection, address = socket.accept() # and hope it works
+            except ssl.SSLError as e:
+               print("SSL error in do_accept(): {}".format(e))
+               return
+            except:
+               kind, val, traceback = sys.exc_info()
+               print("Error in do_accept(): {}".format(val))
+               return
+
+            print("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
+            self.socket_wrappers[connection] = LocalClient(connection)
+            self.client_sockets += [connection]
+            self.sel.register(connection, selectors.EVENT_READ)
+
+         server = socket.socket()
+         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+         server.bind(("0.0.0.0", 1234))
+
+         server = self.tls_ctx_local.wrap_socket(server, server_side=True)
+
+         server.listen(100)
+         server.setblocking(False)
+         self.sel.register(server, selectors.EVENT_READ)
+
+         print("Listening.")
+
+         while True:
+            events = self.sel.select(timeout = 1)
+
+            self.LOCK.acquire()
+
+            for key, mask in events:
+               s = key.fileobj
+               if s == server:
+                  do_accept(s, mask)
+               else:
+                  if s in self.socket_wrappers:
+                     ss = self.socket_wrappers[s]
+                  else:
+                     ss = None
+
+                  if ss == None:
+                     print("NOTE: Read on unregistered socket")
+                     # Almost certainly causes an infinite loop. Should consider raising an error.
+                     break
+
+                  (lines, eof) = ss.read()
+
+                  if eof:
+                     self.sel.unregister(s)
+                     ss.handle_disconnect()
+                     for state in self.states:
+                        if s in state[0]:
+                           del state[0][state[0].index(s)]
+                     if s in self.socket_wrappers:
+                        del self.socket_wrappers[s]
+
+                  for line in lines:
+                     for state in self.states:
+                        if s in state[0]:
+                           result = state[1](s, line)
+                           if result:
+                              break # to next line
+
+            self.LOCK.release()
+
+      except KeyboardInterrupt:
+         print("Exiting uncleanly. Bye...")
 
 
-def do_client_join(args, client):
-   assert type(client) == LocalClient
-
-   if args in servers:
-      client.unsubscribe()
-      servers[args].subscribe(client)
-      client.subscribe(servers[args])
-      client.tell_ok("Subscribed to server `{}'.".format(args))
-      return True
-   else:
-      client.tell_err("No such server `{}'.".format(args))
-      return False
-
-client_commands["j"] = do_client_join
-
-def do_client_connect(args, client):
-   assert type(client) == LocalClient
-
-   if do_client_join(args, client):
-      start_connection(servers[args])
-      return True #(ish)
-   else:
-      return False
-
-client_commands["J"] = do_client_connect
-
-def do_client_debug(args, client):
-   assert type(client) == LocalClient
-
-   try:
-      client.tell_ok(repr(eval(args)))
-   except:
-      kind, value, traceback = sys.exc_info()
-      client.tell_err(repr(value))
-
-client_commands["e"] = do_client_debug
-
-
-states = [(server_sockets, handle_line_server),
-          #(preauth, handle_line_preauth),
-          (client_sockets, handle_line_client)]
-
-
-def run():
+if __name__ == '__main__':
+   cfg = {}
    try:
       with open(CONFIG_FILE, 'r') as f:
          cfg = json.load(f)
    except FileNotFoundError:
       print("Configuration file `{}' not found.  Please create it and try again.".format(CONFIG_FILE))
-      return
+      exit()
 
+   proxy = Proxy(cfg)
+   proxy.run()
 
-   for name, proto in cfg['servers'].items(): # (k, v)
-      servers[name] = RemoteServer(proto['host'], proto['port'])
-      if 'encoding' in proto:
-         servers[name].encoding = proto['encoding']
-      if 'ssl' in proto and proto['ssl'] is True:
-         servers[name].use_SSL = True
-
-
-   try:
-      def do_accept(socket, mask):
-         global client_sockets
-
-         print("Accepting new client...")
-
-         # When SSL is turned on, this can block waiting for the client to send an SSL handshake.
-         # Maybe consider running it in a thread, too?  (That's a lot of threading though.  And
-         # clients are more under our control than remote servers are.)
-         try:
-            connection, address = socket.accept() # and hope it works
-         except ssl.SSLError as e:
-            print("SSL error in do_accept(): {}".format(e))
-            return
-         except:
-            kind, val, traceback = sys.exc_info()
-            print("Error in do_accept(): {}".format(val))
-            return
-
-         print("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
-         socket_wrappers[connection] = LocalClient(connection)
-         client_sockets += [connection]
-         sel.register(connection, selectors.EVENT_READ)
-
-      server = socket.socket()
-      server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-      server.bind(("0.0.0.0", 1234))
-
-      server = tls_ctx_local.wrap_socket(server, server_side=True)
-
-      server.listen(100)
-      server.setblocking(False)
-      sel.register(server, selectors.EVENT_READ)
-
-      print("Listening.")
-
-      while True:
-         events = sel.select(timeout = 1)
-         LOCK.acquire()
-         for key, mask in events:
-            s = key.fileobj
-            if s == server:
-               do_accept(s, mask)
-            else:
-               if s in socket_wrappers:
-                  ss = socket_wrappers[s]
-               else:
-                  ss = None
-
-               if ss == None:
-                  print("NOTE: Read on unregistered socket")
-                  # Almost certainly causes an infinite loop. Should consider raising an error.
-                  break
-
-               (lines, eof) = ss.read()
-
-               if eof:
-                  sel.unregister(s)
-                  ss.handle_disconnect()
-                  for state in states:
-                     if s in state[0]:
-                        del state[0][state[0].index(s)]
-                  if s in socket_wrappers:
-                     del socket_wrappers[s]
-
-               for line in lines:
-                  for state in states:
-                     if s in state[0]:
-                        result = state[1](s, line)
-                        if result:
-                           break # to next line
-         LOCK.release()
-
-   except KeyboardInterrupt:
-      print("Exiting uncleanly. Bye...")
-
-
-if __name__ == '__main__':
-   run()
