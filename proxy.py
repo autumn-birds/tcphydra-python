@@ -15,6 +15,9 @@ import selectors
 
 import json
 
+import pkgutil
+import importlib
+
 
 CONFIG_FILE = 'config.json'
 
@@ -316,6 +319,10 @@ class Proxy:
 
       self.cfg = cfg
 
+   def register_command(self, cmdname, cmd):
+      #assert type(cmd) == function
+      self.client_commands[cmdname] = cmd
+
    ###
    ### STATE: server
    ###
@@ -560,5 +567,25 @@ if __name__ == '__main__':
       exit()
 
    proxy = Proxy(cfg)
+
+   pluginDir = cfg.get('plugin_directory', "plugins")
+   plugin_err_fatal = cfg.get('plugin_errors_fatal', True)
+
+   plugins = {}
+   for P in pkgutil.iter_modules([pluginDir]):
+      try:
+         plugin = P.name
+         m = importlib.import_module("{}.{}".format(pluginDir, plugin))
+         m.setup(proxy)
+         plugins[plugin] = m
+         print("Loaded plugin {}".format(plugin))
+      except:
+         kind, value, traceback = sys.exc_info()
+         print("Error loading plugin {}: {}".format(plugin, repr(value)))
+         print("-------------------- TRACEBACK:\n")
+         print(repr(traceback))
+         if plugin_err_fatal:
+            exit()
+
    proxy.run()
 
