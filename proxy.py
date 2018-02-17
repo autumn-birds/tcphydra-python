@@ -38,10 +38,18 @@ class TextLine:
       assert type(string) == bytes or type(string) == str
       self.__enc = encoding
 
+#     if type(string) == bytes:
+#        self.__raw = string
+#     else:
+#        self.__raw = string.encode(encoding)
+      self.set(string)
+
+   def set(self, string):
+      """(Temporary method for testing.)"""
       if type(string) == bytes:
          self.__raw = string
       else:
-         self.__raw = string.encode(encoding)
+         self.__raw = string.encode(self.__enc)
 
    def as_str(self):
       """Try to 'safely', but lossily, decode the raw line into an ordinary string,
@@ -221,6 +229,9 @@ class RemoteServer(LineBufferingSocketContainer):
       self.connecting_in_thread = False
       self.use_SSL = False
 
+      # Used for bookkeeping by the Proxy class
+      self.filters = []
+
    def handle_data(self, data):
       for sub in self.subscribers:
          sub.write_line(data)
@@ -257,6 +268,9 @@ class LocalClient(LineBufferingSocketContainer):
 
       self.attach_socket(socket)
       self.subscribedTo = None
+
+      # Used for bookkeeping by the Proxy class
+      self.filters = []
 
    def tell_ok(self, msg):
       self.write_str(MESSAGE_PREFIX_OK + msg + "\r\n")
@@ -317,9 +331,23 @@ class Proxy:
 
       self.cfg = cfg
 
+      self.filter_prototypes = {}
+
    def register_command(self, cmdname, cmd):
       #assert type(cmd) == function
-      self.client_commands[cmdname] = cmd
+      if cmdname not in self.client_commands:
+         self.client_commands[cmdname] = cmd
+      else:
+         print("Note: Attempt to overwrite command `{}' failed".format(cmdname))
+
+   def register_filter(self, name, impl):
+      #assert exists impl.from_client, "Error: `{}' filter implementation needs from_client()".format(name)
+      #assert exists impl.from_server, "Error: `{}' filter implementation needs from_server()".format(name)
+
+      if name not in self.filter_prototypes:
+         self.filter_prototypes[name] = impl
+      else:
+         print("Note: Attempted to overwrite filter type `{}' failed".format(name))
 
    ###
    ### STATE: server
@@ -328,7 +356,16 @@ class Proxy:
    def handle_line_server(self, socket, line):
       assert socket in self.server_sockets
 
-      self.socket_wrappers[socket].handle_data(line)
+      svr = self.socket_wrappers[socket]
+      ln = line
+
+      for f in svr.filters:
+         ln = f.from_server(ln)
+
+         if ln is None:
+            return
+
+      self.socket_wrappers[socket].handle_data(ln)
       return False # don't continue trying states
 
    def do_start_connection(self, server):
@@ -407,6 +444,12 @@ class Proxy:
       s = line.as_str().replace('\r\n', '').replace('\n', '')
       c = self.socket_wrappers[socket]
 
+      for f in c.filters:
+         s = f.from_client(s)
+
+         if s is None:
+            return
+
       if s[:len(COMMAND_PREFIX)] == COMMAND_PREFIX:
          try:
             if ' ' in s:
@@ -467,12 +510,36 @@ class Proxy:
    ###
 
    def run(self):
+      # I'm not sure how much sense it makes to do this here and not in __init__ but oh well.
       for name, proto in self.cfg['servers'].items(): # (k, v)
          self.servers[name] = RemoteServer(proto['host'], proto['port'])
+
          if 'encoding' in proto:
             self.servers[name].encoding = proto['encoding']
          if 'ssl' in proto and proto['ssl'] is True:
             self.servers[name].use_SSL = True
+
+         server_filters = self.cfg.get('filter_servers', [])
+         if type(server_filters) != list:
+            print("Error: Configuration option `server_filters' must be specified as list of [name,opts] pairs")
+            return
+
+         for f in self.cfg.get('filter_servers', []):
+            if type(f) != list or len(f) != 2 or type(f[0]) != str or type(f[1]) != dict:
+               print("Error: Format to specify a filter is ['filtername',{'option':'val',...}]")
+               print("Error: Got `{}' instead".format(repr(f)))
+               return
+
+            filter_name = f[0]
+            filter_opts = f[1]
+
+            if filter_name not in self.filter_prototypes:
+               print("Error: No such filter `{}'".format(filter_name))
+               return
+
+            filter_class = self.filter_prototypes[filter_name]
+
+            self.servers[name].filters.append(filter_class(self.servers[name], filter_opts))
 
       try:
          def do_accept(socket, mask):
@@ -552,6 +619,10 @@ class Proxy:
          print("Exiting uncleanly. Bye...")
 
 
+###
+### STARTUP / initialization
+###
+
 if __name__ == '__main__':
    cfg = {}
    try:
@@ -577,8 +648,8 @@ if __name__ == '__main__':
       except:
          kind, value, traceback = sys.exc_info()
          print("Error loading plugin {}: {}".format(plugin, repr(value)))
-         print("-------------------- TRACEBACK:\n")
-         print(repr(traceback))
+         print("-------------------- TRACEBACK:")
+         print(traceback)
          if plugin_err_fatal:
             exit()
 
