@@ -473,14 +473,16 @@ class Proxy:
    def handle_line_client(self, socket, line):
       assert socket in self.client_sockets
 
-      s = line.as_str().replace('\r\n', '').replace('\n', '')
       c = self.socket_wrappers[socket]
 
+      ln = line
       for f in c.filters:
-         s = f.from_client(s)
+         ln = f.from_client(ln)
 
-         if s is None:
+         if ln is None:
             return
+
+      s = line.as_str().replace('\r\n', '').replace('\n', '')
 
       if s[:len(COMMAND_PREFIX)] == COMMAND_PREFIX:
          try:
@@ -558,6 +560,8 @@ class Proxy:
          except FilterSpecificationError as e:
             print("Error setting up filters: {}".format(str(e)))
 
+      client_filters = self.cfg.get('filter_clients', [])
+
       try:
          def do_accept(socket, mask):
             print("Accepting new client...")
@@ -579,6 +583,11 @@ class Proxy:
             self.socket_wrappers[connection] = LocalClient(connection)
             self.client_sockets += [connection]
             self.sel.register(connection, selectors.EVENT_READ)
+
+            try:
+               self.socket_wrappers[connection].add_filters(client_filters, self.filter_prototypes)
+            except FilterSpecificationError as e:
+               self.socket_wrappers[connection].tell_err("Error setting up client filters: {}".format(str(e)))
 
          server = socket.socket()
          server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
