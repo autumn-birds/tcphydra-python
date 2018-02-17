@@ -5,7 +5,7 @@ class TestFilter:
     def from_server(self, line):
         print("Got a line of text: {}".format(line.as_str()))
 
-        if line.as_str()[0] == 'K':
+        if line.as_str()[0] == 'K' or line.as_str()[0] == 'J':
             print("l[0]=K, mutating")
             line.set('X' + line.as_str()[1:])
 

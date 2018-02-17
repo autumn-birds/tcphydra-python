@@ -215,7 +215,45 @@ class LineBufferingSocketContainer:
       self.connected = False
 
 
-class RemoteServer(LineBufferingSocketContainer):
+class FilterSpecificationError(Exception):
+   pass
+
+
+class FilteredSocket(LineBufferingSocketContainer):
+   # Doesn't actually filter *itself* (yet?)
+   # Would probably need to override some methods of the parent class.
+   # (It may be impracticable to self-filter here anyway because the filters need to
+   # know whether their text came from a server or a client and this class is too
+   # abstract to know that. But this seemed like the best way to avoid code duplication.)
+   def __init__(self):
+      super().__init__()
+      self.filters = []
+
+   def add_filters(self, filters, prototypes):
+      """Add filters to self according to the specification in `filters` (same format as
+      configuration file), drawing from the filter prototypes/classes in the dictinoary
+      `prototypes`.  Can raise FilterSpecificationError."""
+
+      if type(filters) != list:
+         raise FilterSpecificationError("Filters must be specified as list of [name,opts] pairs")
+
+      for f in filters:
+         if type(f) != list or len(f) != 2 or type(f[0]) != str or type(f[1]) != dict:
+            raise FilterSpecificationError("Format to specify a filter is ['filtername',{'option':'val',...}]")
+
+         filter_name = f[0]
+         filter_opts = f[1]
+
+         if filter_name not in prototypes:
+            print("Error: No such filter `{}'".format(filter_name))
+            return
+
+         filter_class = prototypes[filter_name]
+
+         self.filters.append(filter_class(self, filter_opts))
+
+
+class RemoteServer(FilteredSocket):
    def __init__(self, host, port):
       super().__init__()
 
@@ -228,9 +266,6 @@ class RemoteServer(LineBufferingSocketContainer):
 
       self.connecting_in_thread = False
       self.use_SSL = False
-
-      # Used for bookkeeping by the Proxy class
-      self.filters = []
 
    def handle_data(self, data):
       for sub in self.subscribers:
@@ -262,15 +297,12 @@ class RemoteServer(LineBufferingSocketContainer):
          sub.tell_err(msg)
 
 
-class LocalClient(LineBufferingSocketContainer):
+class LocalClient(FilteredSocket):
    def __init__(self, socket):
       super().__init__()
 
       self.attach_socket(socket)
       self.subscribedTo = None
-
-      # Used for bookkeeping by the Proxy class
-      self.filters = []
 
    def tell_ok(self, msg):
       self.write_str(MESSAGE_PREFIX_OK + msg + "\r\n")
@@ -520,26 +552,11 @@ class Proxy:
             self.servers[name].use_SSL = True
 
          server_filters = self.cfg.get('filter_servers', [])
-         if type(server_filters) != list:
-            print("Error: Configuration option `server_filters' must be specified as list of [name,opts] pairs")
-            return
-
-         for f in self.cfg.get('filter_servers', []):
-            if type(f) != list or len(f) != 2 or type(f[0]) != str or type(f[1]) != dict:
-               print("Error: Format to specify a filter is ['filtername',{'option':'val',...}]")
-               print("Error: Got `{}' instead".format(repr(f)))
-               return
-
-            filter_name = f[0]
-            filter_opts = f[1]
-
-            if filter_name not in self.filter_prototypes:
-               print("Error: No such filter `{}'".format(filter_name))
-               return
-
-            filter_class = self.filter_prototypes[filter_name]
-
-            self.servers[name].filters.append(filter_class(self.servers[name], filter_opts))
+         try:
+            self.servers[name].add_filters(server_filters, self.filter_prototypes)
+            self.servers[name].add_filters(proto.get('filters', []), self.filter_prototypes)
+         except FilterSpecificationError as e:
+            print("Error setting up filters: {}".format(str(e)))
 
       try:
          def do_accept(socket, mask):
