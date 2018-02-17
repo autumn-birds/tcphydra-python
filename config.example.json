@@ -1,0 +1,20 @@
+{
+	"filter_servers": [],
+	"filter_clients": [["say_quote_strip",{}]],
+	"servers": {
+		"secure-host": {
+		   "host": "somewhere.some-mud.net",
+		   "port": 9090,
+		   "ssl": true
+		},
+		"insecure-host": {
+		   "host": "somewhere-else.some-mud.net",
+		   "port": 1055,
+		},
+		"local": {
+		   "host": "localhost",
+                   "port": 4000,
+		   "filters": [["test",{"nonsense":"this should only be loaded once"}]]
+		}
+	}
+}
