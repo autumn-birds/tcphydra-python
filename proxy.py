@@ -32,6 +32,10 @@ MESSAGE_PREFIX_ERR = '!! '
 
 RECV_MAX = 4096 # bytes
 
+# (defaults; change in config.json)
+BIND_TO_HOST = "localhost"
+BIND_TO_PORT = 1234
+
 
 class TextLine:
    def __init__(self, string, encoding):
@@ -618,7 +622,16 @@ class Proxy:
 
          server = socket.socket()
          server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-         server.bind(("0.0.0.0", 1234))
+
+         bind_to_host = self.cfg.get("bind_to_host", BIND_TO_HOST)
+         bind_to_port = self.cfg.get("bind_to_port", BIND_TO_PORT)
+         if type(bind_to_host) != str:
+            print("Error: host to bind to must be a string")
+            return
+         if type(bind_to_port) != int:
+            print("Error: port to bind to must be a string")
+            return
+         server.bind((bind_to_host, bind_to_port))
 
          server = self.tls_ctx_local.wrap_socket(server, server_side=True)
 

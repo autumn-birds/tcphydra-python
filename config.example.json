@@ -1,4 +1,6 @@
 {
+	"bind_to_host": "localhost",
+	"bind_to_port": 1234,
 	"filter_servers": [],
 	"filter_clients": [["say_quote_strip",{}]],
 	"servers": {
