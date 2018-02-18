@@ -358,8 +358,14 @@ class Proxy:
                      (self.client_sockets, self.handle_line_client)]
 
       self.register_command("e", self.do_client_debug)
+      self.register_command("eval", self.do_client_debug)
+      self.register_command("debug", self.do_client_debug)
       self.register_command("J", self.do_client_connect)
+      self.register_command("connect", self.do_client_connect)
       self.register_command("j", self.do_client_join)
+      self.register_command("join", self.do_client_join)
+      self.register_command("h", self.do_client_help)
+      self.register_command("help", self.do_client_help)
 
       self.cfg = cfg
 
@@ -509,6 +515,7 @@ class Proxy:
       return False # don't continue trying states
 
    def do_client_join(self, args, client):
+      """Start listening to a server."""
       assert type(client) == LocalClient
 
       if args in self.servers:
@@ -522,6 +529,7 @@ class Proxy:
          return False
 
    def do_client_connect(self, args, client):
+      """Start listening to a server and initiate a connection to it."""
       assert type(client) == LocalClient
 
       if self.do_client_join(args, client):
@@ -531,6 +539,7 @@ class Proxy:
          return False
 
    def do_client_debug(self, args, client):
+      """Supply a Python expression to eval() for debugging purposes."""
       assert type(client) == LocalClient
 
       try:
@@ -538,6 +547,24 @@ class Proxy:
       except:
          kind, value, traceback = sys.exc_info()
          client.tell_err(repr(value))
+
+   def do_client_help(self, args, client):
+      """Get help."""
+      assert type(client) == LocalClient
+
+      # Commands can have multiple names, so we collect them in a dictionary ordered by
+      # the function they call so that we don't end up displaying the same bit of help
+      # many times.
+      cmds = {}
+
+      for cmd, fn in self.client_commands.items(): # (k, v)
+         if fn in cmds:
+            cmds[fn].append(cmd)
+         else:
+            cmds[fn] = [cmd]
+
+      for fn, names in cmds.items(): # (k, v)
+         client.tell_ok("{}: {}".format(', '.join(names), fn.__doc__ or "No documentation provided."))
 
    ###
    ### MAIN LOOP
