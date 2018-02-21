@@ -19,6 +19,8 @@ import json
 import pkgutil
 import importlib
 
+import copy
+
 
 CONFIG_FILE = 'config.json'
 
@@ -31,6 +33,145 @@ MESSAGE_PREFIX_OK = '%% '
 MESSAGE_PREFIX_ERR = '!! '
 
 RECV_MAX = 4096 # bytes
+
+
+class TextChunk:
+   """Represents a 'chunk' of text that has uniform attributes."""
+   def __init__(self):
+      pass
+
+   def get_text(self):
+      return ""
+
+   def set_text(self, txt):
+      pass
+
+
+ANSI_COLOR_BLACK = 0
+ANSI_COLOR_WHITE = 7
+ANSI_COLOR_BRIGHT_WHITE = 15
+
+ANSI_ESC = "\x1B"
+ANSI_CSI = ANSI_ESC + "["
+ANSI_ST  = ANSI_ESC + "\\"
+
+class AnsiDisplayState:
+   """Represents an idealised version of a 'display state' or graphics state: e.g.,
+   background/foreground colors, underline/[italic]/bold, etcetera.  Does not attempt
+   to support the whole ANSI standard."""
+   def __init__(self):
+      # The only-16-color colors are (presumably?) the same as the first 16
+      # of the 256-color colors, so we don't bother to make a distinction between
+      # 16-color-mode colors and xterm256-mode colors.
+      self.reset()
+
+   def reset(self):
+      self.fg = None
+      self.bg = None
+      self.bold = False
+
+   def apply_escape_codes(self, codes):
+      """Update self's state by interpreting the ANSI escape sequence in `codes'.
+      Will silently ignore codes it doesn't understand or that are not standard.
+      `codes' must be complete and free of extraneous characters."""
+      assert type(codes) == str
+
+      if codes[0:2] != ANSI_CSI:
+         print("no csi")
+         return
+
+      if codes[-1] != 'm': # SGR (Set Graphics) mode
+         print("no trailing m")
+         return
+
+      codes = codes[2:-1] # everything in between ANSI_CSI and `m'
+
+      # There might be a cleaner way to express this with (say) something like
+      # a grammar or parser...
+
+      codes = codes.split(';')
+      print("CODES = {}".format(codes))
+      # TODO: Now make everything else work that way (with [])
+      idx = 0
+
+      while idx < len(codes):
+         print("looping on codes={}".format(codes))
+         next_code = codes[idx]
+         idx += 1
+
+         if next_code.find(":") != -1:
+            print("warning: found :s, may indicate an odd separator at work")
+            print("ignoring")
+            next
+
+         next_code = int(next_code)
+
+         if next_code >= 30 and next_code <= 37:
+            # Set foreground
+            self.fg = next_code - 30
+
+         elif next_code >= 40 and next_code <= 47:
+            # Set background
+            self.bg = next_code - 40
+
+         elif next_code >= 90 and next_code <= 97:
+            # Set foreground to intense color (non-standard)
+            print("Debug note: Got non-standard color {}".format(next_code))
+            self.fg = next_code - 90 + 8 # ... see wikipedia ansi => 256 colors
+
+         elif next_code >= 100 and next_code <= 107:
+            # Set background to intense color (non-standard)
+            print("Debug note: Got non-standard color {}".format(next_code))
+            self.bg = next_code - 100 + 8 # ... see wikipedia ansi => 256 colors
+
+         elif next_code == 38 or next_code == 48:
+            # Extended xterm256 color may/should follow
+            if idx >= len(codes):
+               print("not enough codes for xterm256")
+               return
+
+            if codes[idx] != '5':
+               print("not a 5 (xterm256)")
+               print(codes[idx])
+               return
+
+            idx += 1
+            color = int(codes[idx])
+            idx += 1
+
+            if color > 255:
+               raise ValueError("Overlarge xterm256 color")
+
+            if next_code == 38:
+               self.fg = color
+            elif next_code == 48:
+               self.bg = color
+
+         elif next_code == 0:
+            # Reset attributes
+            self.reset()
+
+
+class DisplayTextChunk(TextChunk):
+   """A normal region of visible text."""
+   def __init__(self, state=None):
+      super().__init__()
+      self.state = state or AnsiDisplayState()
+      self.text = ""
+
+   def set_text(self, txt):
+      assert type(txt) == str
+      self.text = txt
+
+   def get_text(self, txt):
+      return self.text
+
+
+class AnsiEscapeSeq(TextChunk):
+   """Stores an unrecognized ANSI escape sequence."""
+   def __init__(self, seq=None):
+      super().__init__()
+      self.escape_seq = seq or ""
 
 
 class TextLine:
