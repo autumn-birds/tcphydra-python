@@ -21,6 +21,8 @@ import importlib
 
 import copy
 
+import logging
+
 
 CONFIG_FILE = 'config.json'
 
@@ -46,6 +48,9 @@ class TextChunk:
    def set_text(self, txt):
       pass
 
+   def blends(self, next_chunk):
+      return False
+
 
 ANSI_COLOR_BLACK = 0
 ANSI_COLOR_WHITE = 7
@@ -70,93 +75,104 @@ class AnsiDisplayState:
       self.bg = None
       self.bold = False
 
-   def apply_escape_codes(self, codes):
-      """Update self's state by interpreting the ANSI escape sequence in `codes'.
-      Will silently ignore codes it doesn't understand or that are not standard.
-      `codes' must be complete and free of extraneous characters."""
-      assert type(codes) == str
+def parse_ANSI(codes, priors=None):
+   """Parse ANSI escape sequence `codes' and return a dictionary of the properties
+   of the text affected by them.  If `priors' is not None, this function will
+   clone it and modify as appropriate, carrying over previous attributes.
 
-      if codes[0:2] != ANSI_CSI:
-         print("no csi")
-         return
+   Will silently ignore codes it doesn't understand.
 
-      if codes[-1] != 'm': # SGR (Set Graphics) mode
-         print("no trailing m")
-         return
+   `codes' must be both complete and free of extraneous characters."""
+   assert type(codes) == str
 
-      codes = codes[2:-1] # everything in between ANSI_CSI and `m'
+   if codes[0:2] != ANSI_CSI:
+      logging.info("parse_ANSI: ANSI string with no CSI ({})".format(repr(codes)))
+      return priors
 
-      # There might be a cleaner way to express this with (say) something like
-      # a grammar or parser...
+   if codes[-1] != 'm': # SGR (Set Graphics) mode
+      logging.info("parse_ANSI: ANSI string other than SGR ({})".format(repr(codes)))
+      return priors
 
-      codes = codes.split(';')
-      print("CODES = {}".format(codes))
-      # TODO: Now make everything else work that way (with [])
-      idx = 0
+   codes = codes[2:-1] # everything in between ANSI_CSI and `m'
 
-      while idx < len(codes):
-         print("looping on codes={}".format(codes))
-         next_code = codes[idx]
+   # There might be a cleaner way to express this with (say) something like
+   # a grammar or parser...
+
+   if priors is not None:
+      state = copy.deepcopy(priors)
+   else:
+      state = {}
+
+   codes = codes.split(';')
+   logging.debug("parse_ANSI: Codes after split = {}".format(codes))
+   idx = 0
+
+   while idx < len(codes):
+      logging.debug("parse_ANSI: Looping on codes={}".format(codes))
+
+      next_code = codes[idx]
+      idx += 1
+
+      if next_code.find(":") != -1:
+         logging.warning("parse_ANSI: Found :'s, may indicate an odd separator at work -- ignoring")
+         next
+
+      next_code = int(next_code)
+
+      if next_code >= 30 and next_code <= 37:
+         # Set foreground
+         state['foreground'] = next_code - 30
+
+      elif next_code >= 40 and next_code <= 47:
+         # Set background
+         state['background'] = next_code - 40
+
+      elif next_code >= 90 and next_code <= 97:
+         # Set foreground to intense color (non-standard)
+         logging.info("parse_ANSI: Got non-standard color {}".format(next_code))
+         state['foreground'] = next_code - 90 + 8 # ... see wikipedia ansi => 256 colors
+
+      elif next_code >= 100 and next_code <= 107:
+         # Set background to intense color (non-standard)
+         logging.info("parse_ANSI: Got non-standard color {}".format(next_code))
+         state['background'] = next_code - 100 + 8 # ... see wikipedia ansi => 256 colors
+
+      elif next_code == 38 or next_code == 48:
+         # Extended xterm256 color may/should follow
+         if idx >= len(codes):
+            logging.warning("parse_ANSI: Not enough codes for xterm256")
+            return
+
+         if codes[idx] != '5':
+            logging.warning("parse_ANSI: Expected 5 (for xterm256), got {}".format(codes[idx]))
+            return
+
+         idx += 1
+         color = int(codes[idx])
          idx += 1
 
-         if next_code.find(":") != -1:
-            print("warning: found :s, may indicate an odd separator at work")
-            print("ignoring")
-            next
-
-         next_code = int(next_code)
-
-         if next_code >= 30 and next_code <= 37:
-            # Set foreground
-            self.fg = next_code - 30
-
-         elif next_code >= 40 and next_code <= 47:
-            # Set background
-            self.bg = next_code - 40
-
-         elif next_code >= 90 and next_code <= 97:
-            # Set foreground to intense color (non-standard)
-            print("Debug note: Got non-standard color {}".format(next_code))
-            self.fg = next_code - 90 + 8 # ... see wikipedia ansi => 256 colors
-
-         elif next_code >= 100 and next_code <= 107:
-            # Set background to intense color (non-standard)
-            print("Debug note: Got non-standard color {}".format(next_code))
-            self.bg = next_code - 100 + 8 # ... see wikipedia ansi => 256 colors
-
-         elif next_code == 38 or next_code == 48:
-            # Extended xterm256 color may/should follow
-            if idx >= len(codes):
-               print("not enough codes for xterm256")
-               return
-
-            if codes[idx] != '5':
-               print("not a 5 (xterm256)")
-               print(codes[idx])
-               return
-
-            idx += 1
-            color = int(codes[idx])
-            idx += 1
-
-            if color > 255:
-               raise ValueError("Overlarge xterm256 color")
-
+         if color > 255:
+            logging.warning("parse_ANSI: Overlarge xterm256 color (codes={})".format(codes))
+         else:   
             if next_code == 38:
-               self.fg = color
+               state['foreground'] = color
             elif next_code == 48:
-               self.bg = color
+               state['background'] = color
 
-         elif next_code == 0:
-            # Reset attributes
-            self.reset()
+      elif next_code == 0:
+         # Reset attributes
+         for attr in ['foreground', 'background', 'bold']:
+            if attr in state:
+               state[attr] = None
+
+   return state
 
 
 class DisplayTextChunk(TextChunk):
    """A normal region of visible text."""
    def __init__(self, state=None):
       super().__init__()
-      self.state = state or AnsiDisplayState()
+      self.attrs = state or {}
       self.text = ""
 
    def set_text(self, txt):
@@ -165,6 +181,12 @@ class DisplayTextChunk(TextChunk):
 
    def get_text(self, txt):
       return self.text
+
+   def blends(self, next_chunk):
+      if isinstance(next_chunk, DisplayTextChunk):
+         return self.attrs == next_chunk.attrs
+      else:
+         return False
 
 
 class AnsiEscapeSeq(TextChunk):
