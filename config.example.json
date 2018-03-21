@@ -11,7 +11,7 @@
 		},
 		"insecure-host": {
 		   "host": "somewhere-else.some-mud.net",
-		   "port": 1055,
+		   "port": 1055
 		},
 		"local": {
 		   "host": "localhost",
