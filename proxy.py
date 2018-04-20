@@ -3,8 +3,8 @@
 # 'Telnet' multiplexer for MUDs, etc. Python 3.
 
 # Things we should be doing someday:
-#  - actually understand the underlying protocols (Telnet)
-#      - this turns out to be kind of necessary
+#  - actually understand the underlying protocols (Telnet) instead of just stripping
+#    them out
 
 
 import sys
