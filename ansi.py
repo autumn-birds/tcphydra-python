@@ -81,11 +81,11 @@ def parse_ANSI(text):
           colors = copy.copy(last_colors)
           for code in codes.split(';'):
              code = int(code)
-             if code >= 30 and code < 37:
+             if code >= 30 and code <= 37:
                 # Sets foreground color
                 colors['fg'] = code - 30
 
-             elif code >= 40 and code < 47:
+             elif code >= 40 and code <= 47:
                 # Sets background color
                 colors['bg'] = code - 40
 
@@ -108,8 +108,14 @@ def parse_ANSI(text):
                    if attr in colors:
                       del colors[attr]
 
-          last_colors = copy.copy(colors)
-          acc.append(colors)
+          if colors != last_colors:
+             last_colors = copy.copy(colors)
+             if len(acc) >= 1 and type(acc[-1]) == dict:
+                # update
+                acc[-1] = colors
+             else:
+                acc.append(colors)
+
           cursor = endofcode + 1
           state = "TEXT"
 
