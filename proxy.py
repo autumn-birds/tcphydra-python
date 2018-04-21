@@ -1,11 +1,10 @@
-# vim:tabstop=3 shiftwidth=3 expandtab autoindent
+# vim: tabstop=3:shiftwidth=3:expandtab:autoindent
 
 # 'Telnet' multiplexer for MUDs, etc. Python 3.
 
 # Things we should be doing someday:
 #  - actually understand the underlying protocols (Telnet) instead of just stripping
 #    them out
-
 
 import sys
 import threading
@@ -180,6 +179,8 @@ class LineBufferingSocketContainer:
             elif self.__b_recv_buffer[x] <= DONT and self.__b_recv_buffer[x] >= WILL:
                pass
             else:
+               # TODO: Figure out if there are Telnet codes that will be baffled by this
+               # (are they all guaranteed to be 2 bytes long except for IAC <DODONTWILLWONT> XYZ?)
                in_command = False
          else:
             if self.__b_recv_buffer[x] == IAC:
