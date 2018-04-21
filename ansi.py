@@ -53,6 +53,10 @@ def parse_ANSI(text):
              state = "TEXT"
           elif character in ['X', '_', '^', ']', 'P']:
              state = "ANSI_STRING_COMMAND"
+          else:
+             # ... we have no idea.
+             # TODO: Should we raise an error here or just fail silently?
+             state = "TEXT"
 
           cursor += 1
 
@@ -65,8 +69,6 @@ def parse_ANSI(text):
              cursor = endofstr + len(ANSI_ST)
 
        elif state == "ANSI_CSI":
-          # This is broken because text[cursor:] starts at a DIFFERENT POSITION
-          # than text. Need to offset it or some nonsense.
           endofcode = text[cursor:].find('m') + cursor
           if endofcode == -1:
              raise ANSIParsingError("Unbounded CSI")
