@@ -655,11 +655,7 @@ class Proxy:
                   if s in self.socket_wrappers:
                      ss = self.socket_wrappers[s]
                   else:
-                     ss = None
-
-                  if ss == None:
-                     print("NOTE: Read on unregistered socket")
-                     # Almost certainly causes an infinite loop. Should consider raising an error.
+                     raise Exception("Read on unregistered socket")
                      break
 
                   (lines, eof) = ss.read()
