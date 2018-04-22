@@ -79,9 +79,34 @@ def parse_ANSI(text):
              raise ANSIParsingError("Unspported separator (':') found")
 
           colors = copy.copy(last_colors)
+          xterm256mode = 0
+          xterm256fg_bg = 0
+
           for code in codes.split(';'):
              code = int(code)
-             if code >= 30 and code <= 37:
+
+             if xterm256mode == 1:
+                if code == 5:
+                   xterm256mode = 2
+                else:
+                   raise ANSIParsingError("xterm256 color parsing: expected a 5, got {}".format(code))
+
+             elif xterm256mode == 2:
+                if code > 255 or code < 0:
+                   raise ANSIParsingError("xterm256 color parsing: color {} is out of bounds".format(code))
+
+                if xterm256fg_bg == 38:
+                   colors['fg'] = code
+                elif xterm256fg_bg == 48:
+                   colors['bg'] = code
+                else:
+                   # Theoretically, this should never be reached ... but there's no reason
+                   # not to cover one's bases.
+                   raise ANSIParsingError("xterm256 color parsing: {} is not 38 or 48".format(xterm256fg_bg))
+
+                xterm256mode = 0
+
+             elif code >= 30 and code <= 37:
                 # Sets foreground color
                 colors['fg'] = code - 30
 
@@ -99,8 +124,8 @@ def parse_ANSI(text):
 
              elif code == 38 or code == 48:
                 # Sets an extended xterm256 color
-                # (TO BE IMPLEMENTED)
-                raise ANSIParsingError("Do not yet support xterm256 colors")
+                xterm256mode = 1
+                xterm256fg_bg = code
 
              elif code == 0:
                 # Resets attributes
