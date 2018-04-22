@@ -270,13 +270,16 @@ class FilteredSocket(LineBufferingSocketContainer):
 
 
 class RemoteServer(FilteredSocket):
-   def __init__(self, host, port):
+   def __init__(self, host, port, name=""):
       super().__init__()
 
-      assert type(host) == str
-      assert type(port) == int
+      assert type(host) is str
+      assert type(name) is str
+      assert type(port) is int
+
       self.host = host
       self.port = port
+      self.name = name
 
       self.subscribers = []
 
@@ -634,7 +637,7 @@ class Proxy:
    def run(self):
       # I'm not sure how much sense it makes to do this here and not in __init__ but oh well.
       for name, proto in self.cfg['servers'].items(): # (k, v)
-         self.servers[name] = RemoteServer(proto['host'], proto['port'])
+         self.servers[name] = RemoteServer(proto['host'], proto['port'], name)
 
          if 'encoding' in proto:
             self.servers[name].encoding = proto['encoding']

@@ -15,9 +15,20 @@ class LoggingFilter:
         self.filehandle = None
         self.xml = None
 
+        # This is kind of hacky, but I don't know of a good way to get
+        # access to the main code's types from within the modules it
+        # imports, so I can't directly see if we're getting the right
+        # types here...  (You can do `import proxy` but you seem to get
+        # a new copy of everything.)
+        try:
+            self.connection_name = connection.name
+        except AttributeError:
+            self.connection_name = "client"
+
     def resetfilename(self):
         self.filename = self.filename_template \
-                        .replace('DATE', time.strftime("%Y-%m-%d_%H%M"))
+                        .replace('DATE', time.strftime("%Y-%m-%d_%H%M")) \
+                        .replace('CONNECTION', self.connection_name)
 
     def open(self):
         global open_logs
