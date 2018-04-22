@@ -112,6 +112,12 @@ def parse_ANSI(text):
              elif code == 2:
                 colors['bold'] = 0
 
+             elif code == 7:
+                colors['inverse'] = 1
+
+             elif code == 27:
+                colors['inverse'] = 0
+
              elif code >= 30 and code <= 37:
                 # Sets foreground color
                 colors['fg'] = code - 30
@@ -135,7 +141,7 @@ def parse_ANSI(text):
 
              elif code == 0:
                 # Resets attributes
-                for attr in ['fg', 'bg', 'bold']:
+                for attr in ['fg', 'bg', 'bold', 'inverse']:
                    if attr in colors:
                       del colors[attr]
 
