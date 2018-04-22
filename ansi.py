@@ -79,9 +79,9 @@ def parse_ANSI(text):
              raise ANSIParsingError("Unspported separator (':') found")
 
           colors = copy.copy(last_colors)
+
           xterm256mode = 0
           xterm256fg_bg = 0
-
           for code in codes.split(';'):
              code = int(code)
 
@@ -106,6 +106,12 @@ def parse_ANSI(text):
 
                 xterm256mode = 0
 
+             elif code == 1:
+                colors['bold'] = 1
+
+             elif code == 2:
+                colors['bold'] = 0
+
              elif code >= 30 and code <= 37:
                 # Sets foreground color
                 colors['fg'] = code - 30
@@ -129,7 +135,7 @@ def parse_ANSI(text):
 
              elif code == 0:
                 # Resets attributes
-                for attr in ['fg', 'bg']:
+                for attr in ['fg', 'bg', 'bold']:
                    if attr in colors:
                       del colors[attr]
 
