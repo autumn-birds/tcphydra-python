@@ -72,7 +72,7 @@ class XmlTagOutputter:
         while len(self.tag_stack) > 0:
             self.close_tag()
 
-    def inline_tag(self, tag, props={}, content):
+    def inline_tag(self, tag, props={}, content=""):
         """Write a self-contained tag on the current line, with content."""
         self.write("{}{}</{}>".format(self.tag_from_spec(tag, props), \
                                       self.escape(content), \
