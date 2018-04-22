@@ -8,6 +8,8 @@
 
 import sys
 import threading
+import logging
+import traceback
 
 import socket
 import ssl
@@ -17,6 +19,8 @@ import json
 
 import pkgutil
 import importlib
+
+import ansi
 
 
 CONFIG_FILE = 'config.json'
@@ -36,15 +40,14 @@ BIND_TO_HOST = "localhost"
 BIND_TO_PORT = 1234
 
 
+logging.basicConfig(level=logging.DEBUG)
+
+
 class TextLine:
    def __init__(self, string, encoding):
       assert type(string) == bytes or type(string) == str
       self.__enc = encoding
 
-#     if type(string) == bytes:
-#        self.__raw = string
-#     else:
-#        self.__raw = string.encode(encoding)
       self.set(string)
 
    def set(self, string):
@@ -53,6 +56,13 @@ class TextLine:
          self.__raw = string
       else:
          self.__raw = string.encode(self.__enc)
+
+      try:
+         self.parsed = ansi.parse_ANSI(self.as_str())
+         logging.info("Parsed ANSI colors into {} from {}".format(repr(self.parsed), repr(self.as_str())))
+      except ansi.ANSIParsingError as e:
+         logging.warning("Error while trying to parse ANSI colors: {}".format(str(e)))
+         self.parsed = [repr(self.__raw)[1:-1]]    # escapes any ESCs, etc., for you
 
    def as_str(self):
       """Try to 'safely', but lossily, decode the raw line into an ordinary string,
@@ -348,8 +358,10 @@ class Proxy:
 
       self.tls_ctx_remote = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
       self.tls_ctx_local  = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH)
-      self.tls_ctx_remote.verify_mode = ssl.CERT_OPTIONAL
       self.tls_ctx_remote.check_hostname = False
+      # This is insecure and bad.  IDEALLY everything would serve a correctly set up
+      # certificate and it would Just Work.  But ...
+      self.tls_ctx_remote.verify_mode = ssl.CERT_NONE
       self.tls_ctx_local.load_cert_chain("ssl/cert.pem")
 
       self.servers = {}             # index of available servers by display name
@@ -455,9 +467,9 @@ class Proxy:
          server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
 
       except:
-         kind, value, traceback = sys.exc_info()
+         kind, value, t = sys.exc_info()
          server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
-         print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + repr(traceback))
+         print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + traceback.format_exc())
 
       finally:
          server.connecting_in_thread = False
@@ -510,9 +522,9 @@ class Proxy:
                c.tell_err("Command `{}' not found.".format(cmd))
 
          except:
-            kind, value, traceback = sys.exc_info()
+            kind, value, t = sys.exc_info()
             c.tell_err("Error during command processing: {}".format(repr(value)))
-            print("COMMAND PROCESSING ERROR\n========================\n\n" + repr(traceback))
+            print("COMMAND PROCESSING ERROR\n========================\n\n" + traceback.format_exc())
 
       else:
          c.handle_data(line)
@@ -550,7 +562,7 @@ class Proxy:
       try:
          client.tell_ok(repr(eval(args)))
       except:
-         kind, value, traceback = sys.exc_info()
+         kind, value, t = sys.exc_info()
          client.tell_err(repr(value))
 
    def do_client_help(self, args, client):
@@ -712,9 +724,26 @@ if __name__ == '__main__':
          kind, value, traceback = sys.exc_info()
          print("Error loading plugin {}: {}".format(plugin, repr(value)))
          print("-------------------- TRACEBACK:")
-         print(traceback)
+         print(traceback.format_exc())
          if plugin_err_fatal:
             exit()
 
-   proxy.run()
+   try:
+      proxy.run()
 
+   except:
+      kind, value, t = sys.exc_info()
+      print("Runtime error: {}".format(repr(value)))
+      traceback.print_exc()
+
+   for P in plugins.values():
+      try:
+         P.teardown(proxy)
+
+      except AttributeError:
+         pass
+
+      except Exception:
+         kind, value, t = sys.exc_info()
+         print("Error unloading plugins: {}".format(repr(value)))
+         traceback.print_exc()
