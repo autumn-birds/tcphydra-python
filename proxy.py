@@ -135,7 +135,7 @@ class LineBufferingSocketContainer:
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
 
          except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
-            print("Note: BlockingIOError in flush() call")
+            logging.info("Note: BlockingIOError in flush() call")
             break
 
    def read(self):
@@ -261,7 +261,7 @@ class FilteredSocket(LineBufferingSocketContainer):
          filter_opts = f[1]
 
          if filter_name not in prototypes:
-            print("Error: No such filter `{}'".format(filter_name))
+            raise FilterSpecificationError("No such filter `{}'".format(filter_name))
             return
 
          filter_class = prototypes[filter_name]
@@ -429,7 +429,7 @@ class Proxy:
       if cmdname not in self.client_commands:
          self.client_commands[cmdname] = cmd
       else:
-         print("Note: Attempt to overwrite command `{}' failed".format(cmdname))
+         logging.warning("Note: Attempt to overwrite command `{}' failed".format(cmdname))
 
    def register_filter(self, name, impl):
       #assert exists impl.from_client, "Error: `{}' filter implementation needs from_client()".format(name)
@@ -438,7 +438,7 @@ class Proxy:
       if name not in self.filter_prototypes:
          self.filter_prototypes[name] = impl
       else:
-         print("Note: Attempted to overwrite filter type `{}' failed".format(name))
+         logging.warning("Note: Attempted to overwrite filter type `{}' failed".format(name))
 
    ###
    ### STATE: server
@@ -465,7 +465,7 @@ class Proxy:
       return False # don't continue trying states
 
    def do_start_connection(self, server):
-      print("Starting to connect to server {}:{}.".format(server.host, server.port))
+      logging.info("Starting to connect to server {}:{}.".format(server.host, server.port))
 
       # This will always be ran in a thread -- to prevent long-blocking connection
       # attempts from hanging the whole program (e.g., when a server is down,
@@ -511,7 +511,7 @@ class Proxy:
       except Exception:
          kind, value, t = sys.exc_info()
          server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
-         print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + traceback.format_exc())
+         logging.error("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + traceback.format_exc())
 
       finally:
          server.connecting_in_thread = False
@@ -571,7 +571,7 @@ class Proxy:
          except Exception:
             kind, value, t = sys.exc_info()
             c.tell_err("Error during command processing: {}".format(repr(value)))
-            print("COMMAND PROCESSING ERROR\n========================\n\n" + traceback.format_exc())
+            logging.error("COMMAND PROCESSING ERROR\n========================\n\n" + traceback.format_exc())
 
       else:
          c.handle_data(line)
@@ -649,13 +649,13 @@ class Proxy:
             self.servers[name].add_filters(server_filters, self.filter_prototypes)
             self.servers[name].add_filters(proto.get('filters', []), self.filter_prototypes)
          except FilterSpecificationError as e:
-            print("Error setting up filters: {}".format(str(e)))
+            logging.error("Error while setting up filters: {}".format(str(e)))
 
       client_filters = self.cfg.get('filter_clients', [])
 
       try:
          def do_accept(socket, mask):
-            print("Accepting new client...")
+            logging.info("Accepting new client...")
 
             # When SSL is turned on, this can block waiting for the client to send an SSL handshake.
             # Maybe consider running it in a thread, too?  (That's a lot of threading though.  And
@@ -663,14 +663,14 @@ class Proxy:
             try:
                connection, address = socket.accept() # and hope it works
             except ssl.SSLError as e:
-               print("SSL error in do_accept(): {}".format(e))
+               logging.error("SSL error in do_accept(): {}".format(e))
                return
             except Exception:
                kind, val, traceback = sys.exc_info()
-               print("Error in do_accept(): {}".format(val))
+               logging.error("Error in do_accept(): {}".format(val))
                return
 
-            print("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
+            logging.info("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
             self.socket_wrappers[connection] = LocalClient(connection)
             self.client_sockets += [connection]
             self.sel.register(connection, selectors.EVENT_READ)
@@ -686,10 +686,10 @@ class Proxy:
          bind_to_host = self.cfg.get("bind_to_host", BIND_TO_HOST)
          bind_to_port = self.cfg.get("bind_to_port", BIND_TO_PORT)
          if type(bind_to_host) != str:
-            print("Error: host to bind to must be a string")
+            logging.error("Error: host to bind to must be a string")
             return
          if type(bind_to_port) != int:
-            print("Error: port to bind to must be a string")
+            logging.error("Error: port to bind to must be a string")
             return
          server.bind((bind_to_host, bind_to_port))
 
@@ -699,7 +699,7 @@ class Proxy:
          server.setblocking(False)
          self.sel.register(server, selectors.EVENT_READ)
 
-         print("Listening.")
+         logging.info("Listening.")
 
          while True:
             events = self.sel.select(timeout = 1)
@@ -738,7 +738,7 @@ class Proxy:
             self.LOCK.release()
 
       except KeyboardInterrupt:
-         print("Exiting uncleanly. Bye...")
+         logging.info("Caught KeyboardInterrupt; quitting...")
 
 
 ###
@@ -751,7 +751,7 @@ if __name__ == '__main__':
       with open(CONFIG_FILE, 'r') as f:
          cfg = json.load(f)
    except FileNotFoundError:
-      print("Configuration file `{}' not found.  Please create it and try again.".format(CONFIG_FILE))
+      logging.error("Configuration file `{}' not found.  Please create it and try again.".format(CONFIG_FILE))
       exit()
 
    proxy = Proxy(cfg)
@@ -766,10 +766,10 @@ if __name__ == '__main__':
          m = importlib.import_module("{}.{}".format(pluginDir, plugin))
          m.setup(proxy)
          plugins[plugin] = m
-         print("Loaded plugin {}".format(plugin))
+         logging.info("Loaded plugin {}".format(plugin))
       except Exception:
          kind, value, traceback = sys.exc_info()
-         print("Error loading plugin {}: {}".format(plugin, repr(value)))
+         logging.error("Error loading plugin {}: {}".format(plugin, repr(value)))
          print("-------------------- TRACEBACK:")
          print(traceback.format_exc())
          if plugin_err_fatal:
@@ -780,7 +780,7 @@ if __name__ == '__main__':
 
    except Exception:
       kind, value, t = sys.exc_info()
-      print("Runtime error: {}".format(repr(value)))
+      logging.error("Runtime error: {}".format(repr(value)))
       traceback.print_exc()
 
    for P in plugins.values():
@@ -792,5 +792,5 @@ if __name__ == '__main__':
 
       except Exception:
          kind, value, t = sys.exc_info()
-         print("Error unloading plugins: {}".format(repr(value)))
+         logging.error("Error unloading plugins: {}".format(repr(value)))
          traceback.print_exc()
