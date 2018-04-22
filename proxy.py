@@ -133,6 +133,7 @@ class LineBufferingSocketContainer:
             t = self.__b_send_buffer.index(self.linesep)
             n_bytes = self.socket.send(self.__b_send_buffer[:t+1])
             self.__b_send_buffer = self.__b_send_buffer[n_bytes:]
+
          except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
             print("Note: BlockingIOError in flush() call")
             break
@@ -286,10 +287,26 @@ class RemoteServer(FilteredSocket):
       for sub in self.subscribers:
          sub.write_line(data)
 
+   def attach_socket(self, socket):
+      # Overridden to notify things when a server is connected.
+      super().attach_socket(socket)
+
+      for f in self.filters:
+         try:
+            f.server_connect(True)
+         except AttributeError:
+            pass
+
    def handle_disconnect(self):
       super().handle_disconnect()
       for sub in self.subscribers:
          sub.tell_err("Remote server closed connection.")
+
+      for f in self.filters:
+         try:
+            f.server_connect(False)
+         except AttributeError:
+            pass
 
    def subscribe(self, supplicant):
       assert type(supplicant) == LocalClient
@@ -343,11 +360,27 @@ class LocalClient(FilteredSocket):
       else:
          self.tell_err("Remote server not connected.")
 
+   def attach_socket(self, socket):
+      # Overridden to notify things when a client is connected.
+      super().attach_socket(socket)
+
+      for f in self.filters:
+         try:
+            f.server_connect(True)
+         except AttributeError:
+            pass
+
    def handle_disconnect(self):
       super().handle_disconnect()
 
       if self.subscribedTo != None:
          self.subscribedTo.unsubscribe(self)
+
+      for f in self.filters:
+         try:
+            f.client_connect(False)
+         except AttributeError:
+            pass
 
 
 class Proxy:
@@ -457,6 +490,7 @@ class Proxy:
 
          self.LOCK.acquire()
          rlock = True
+
          server.attach_socket(C)
          self.socket_wrappers[C] = server
          self.server_sockets += [C]
