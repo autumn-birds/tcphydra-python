@@ -68,7 +68,11 @@ class LoggingFilter:
         self.xml.open_tag("line", {'date': datetime.datetime.utcnow().isoformat()})
 
         try:
-            line = ansi.parse_ANSI(line.as_str())
+            # We replace '\r' and '\n' because the raw line as sent from the server
+            # may / will have some kind of trailing newline, and we don't want that
+            # in the logs -- the lines are already separated for us as it is.
+            line = ansi.parse_ANSI(line.as_str().replace('\r','').replace('\n',''))
+
         except ansi.ANSIParsingError as e:
             logging.warning("Error while trying to parse ANSI colors: {}".format(str(e)))
             # [1:-1] removes the quotes from the repr() representation, effectively
@@ -106,6 +110,7 @@ class LoggingFilter:
             self.xml.inline_tag("text", pending_colors, pending_text)
 
         self.xml.close_tag()
+        self.filehandle.flush()
 
         return passthrough
 
