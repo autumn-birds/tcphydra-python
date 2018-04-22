@@ -11,6 +11,8 @@ class XmlTagOutputter:
         self.indent_level = 0
         self.tag_stack = []
         self.xml = ""
+        self.write_callback = None
+        self.buffer = True
 
     def escape(self, txt):
         return txt.replace('<', '&lt;').replace('>', '&gt;') \
@@ -26,8 +28,14 @@ class XmlTagOutputter:
         be escaped.  This is because this method is designed for adding
         literal code to the document -- for example, a header or something
         with embedded tags."""
-        self.xml += "{}{}\n".format(self.indent * self.indent_level, \
-                                    txt)
+        line = "{}{}\n".format(self.indent * self.indent_level, \
+                               txt)
+
+        if self.write_callback is not None:
+            self.write_callback(line)
+
+        if self.buffer:
+            self.xml += line
 
     def tag_from_spec(self, tag, props):
         """Generate an opening tag with the provided name and properties."""
