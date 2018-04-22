@@ -62,6 +62,9 @@ class XmlTagOutputter:
 
     def close_tag(self):
         """Close the topmost tag if any is open."""
+        # TODO: Consider whether to take a 'tag' parameter which asserts
+        # that the tag being closed is, in fact, the same as the named
+        # parameter?  Might help to catch errors / increase confidence.
         if len(self.tag_stack) > 0:
             if self.indent_level > 0:
                 self.indent_level -= 1

@@ -2,6 +2,7 @@ import xmlwriter
 import ansi
 
 import datetime
+import time
 import logging
 
 open_logs = []
@@ -23,6 +24,8 @@ class LoggingFilter:
 
         if self.filehandle is not None:
             raise ValueError("Cannot open log when already open")
+
+        self.resetfilename()
 
         try:
             self.filehandle = open(self.filename, 'x')
@@ -60,6 +63,8 @@ class LoggingFilter:
         if self.filehandle is None:
             self.open()
 
+        passthrough = line
+
         self.xml.open_tag("line", {'date': datetime.datetime.utcnow().isoformat()})
 
         try:
@@ -67,8 +72,11 @@ class LoggingFilter:
         except ansi.ANSIParsingError as e:
             logging.warning("Error while trying to parse ANSI colors: {}".format(str(e)))
             # [1:-1] removes the quotes from the repr() representation, effectively
-            # escaping any 'funny' characters that might be in the string.
-            # ... this might possibly be not the best solution.
+            # escaping any 'funny' characters that might be in the string.  In this
+            # case, we want to make sure we escape ANSI codes (since we failed to parse
+            # the ANSI codes), and repr() does that.
+            #
+            # ... still, this might possibly be not the best solution.
             line = [repr(line.as_str())[1:-1]]
 
         pending_text = None
@@ -92,10 +100,17 @@ class LoggingFilter:
                 raise TypeError("Unexpected type in parsed line of text")
 
         if pending_text is not None:
+            if pending_colors is None:
+                pending_colors = {}
+            logging.debug("pending_colors = {}; pending_text = {}".format(repr(pending_colors), repr(pending_text)))
             self.xml.inline_tag("text", pending_colors, pending_text)
 
+        self.xml.close_tag()
+
+        return passthrough
+
     def from_client(self, line):
-        pass
+        return line
 
     def server_connect(self, connected):
         if connected:
