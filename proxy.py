@@ -415,7 +415,12 @@ class Proxy:
       ln = line
 
       for f in svr.filters:
-         ln = f.from_server(ln)
+         try:
+            ln = f.from_server(ln)
+         except Exception:
+            kind, value, t = sys.exc_info()
+            logging.error("Error applying a server filter: {}".format(repr(value)))
+            logging.error(traceback.format_exc())
 
          if ln is None:
             return
@@ -466,7 +471,7 @@ class Proxy:
       except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
          server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
 
-      except:
+      except Exception:
          kind, value, t = sys.exc_info()
          server.warn_all("Connection attempt failed, other error: {}".format(repr(value)))
          print("NON-SOCKET CONNECTION ERROR\n===========================\n\n" + traceback.format_exc())
@@ -500,7 +505,12 @@ class Proxy:
 
       ln = line
       for f in c.filters:
-         ln = f.from_client(ln)
+         try:
+            ln = f.from_client(ln)
+         except Exception:
+            kind, value, t = sys.exc_info()
+            logging.error("Error applying a client filter: {}".format(repr(value)))
+            logging.error(traceback.format_exc())
 
          if ln is None:
             return
@@ -521,7 +531,7 @@ class Proxy:
             else:
                c.tell_err("Command `{}' not found.".format(cmd))
 
-         except:
+         except Exception:
             kind, value, t = sys.exc_info()
             c.tell_err("Error during command processing: {}".format(repr(value)))
             print("COMMAND PROCESSING ERROR\n========================\n\n" + traceback.format_exc())
@@ -561,7 +571,7 @@ class Proxy:
 
       try:
          client.tell_ok(repr(eval(args)))
-      except:
+      except Exception:
          kind, value, t = sys.exc_info()
          client.tell_err(repr(value))
 
@@ -618,7 +628,7 @@ class Proxy:
             except ssl.SSLError as e:
                print("SSL error in do_accept(): {}".format(e))
                return
-            except:
+            except Exception:
                kind, val, traceback = sys.exc_info()
                print("Error in do_accept(): {}".format(val))
                return
@@ -720,7 +730,7 @@ if __name__ == '__main__':
          m.setup(proxy)
          plugins[plugin] = m
          print("Loaded plugin {}".format(plugin))
-      except:
+      except Exception:
          kind, value, traceback = sys.exc_info()
          print("Error loading plugin {}: {}".format(plugin, repr(value)))
          print("-------------------- TRACEBACK:")
@@ -731,7 +741,7 @@ if __name__ == '__main__':
    try:
       proxy.run()
 
-   except:
+   except Exception:
       kind, value, t = sys.exc_info()
       print("Runtime error: {}".format(repr(value)))
       traceback.print_exc()
