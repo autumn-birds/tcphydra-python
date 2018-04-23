@@ -17,6 +17,10 @@ import selectors
 
 import json
 
+import os
+import hashlib
+import getpass
+
 import pkgutil
 import importlib
 
@@ -24,6 +28,7 @@ import ansi
 
 
 CONFIG_FILE = 'config.json'
+PASSWORD_FILE = 'password.json' # Password hash is stored here
 
 
 ENCODING = 'utf-8'  # (default)
@@ -41,6 +46,97 @@ BIND_TO_PORT = 1234
 
 
 logging.basicConfig(level=logging.DEBUG)
+
+
+###
+### UTILITY FUNCTIONS
+###
+
+
+def load_json(filename):
+   try:
+      with open(filename, 'r') as f:
+         cfg = json.load(f)
+      return cfg
+
+   except FileNotFoundError:
+      logging.info("Could not read JSON file {}".format(filename))
+      return None # ... we could just ignore it and let caller handle the
+                  # exception, but in this case since we're trying to *get
+                  # a value* it seems more appropriate to return no value
+                  # if there's nothing to get.
+
+
+def save_json(data, filename):
+    try:
+       with open(filename, 'w') as f:
+          json.dump(data, f, indent=3)
+
+    except Exception as e:
+       logging.error("Could not write JSON to file {}".format(filename))
+       raise e
+
+
+###
+### PASSWORD
+###
+
+# We want to make sure random people can't sneak in and access the proxy, even
+# if it's on a local-area network.  We use a single password for this.
+
+# After reading some things, I chose to use...scrypt.  I am not a cryptographer,
+# but it looked reasonable, it was in the Python standard library, and it seemed
+# possible it was more secure than sha256.  It's unlikely this particular application
+# will be attacked by a serious password-cracker anyway, but you never really
+# know...
+
+class Password:
+   """Stores a hashed user password using scrypt.
+
+   When it is initialized, it will try to load the hash from a file; if it can't manage
+   to do that, it will block on initialization to prompt the user for a new password
+   (and try to persist that to the file.)"""
+   def __init__(self):
+      self.hashed = load_json(PASSWORD_FILE)
+      if self.hashed is None:
+         self.prompt_user_for_new_password()
+         save_json(self.hashed, PASSWORD_FILE)
+
+   def hash(self, password, seed):
+      # https://blog.filippo.io/the-scrypt-parameters/ was used for a reference for
+      # what these mean and what to set them to.
+      n = 32768
+      r = 8
+      p = 1
+      hashlib.scrypt(password, seed, 32768, 8, 1)
+
+   def prompt_user_for_new_password(self):
+      seed = os.urandom(16)
+
+      pw = None
+      while pw is None:
+         pw_one = getpass.getpass(prompt='No password to access the proxy has been set.\nEnter one now: ')
+         pw_two = getpass.getpass(prompt='Confirm password: ')
+
+         if pw_two == pw_one:
+            pw = pw_one
+
+      self.hashed = {'seed': seed, 'hash': self.hash(pw, seed)}
+
+   def verify(self, candidate_password):
+      if self.hashed is None:
+         self.prompt_user_for_new_password()
+
+      candidate = self.hash(candidate_password, self.hashed['seed'])
+      if candidate == self.hash['hash']:
+         return True
+      else:
+         return False
+
+
+###
+### NETWORKING
+###
 
 
 class TextLine:
@@ -386,6 +482,11 @@ class LocalClient(FilteredSocket):
             pass
 
 
+###
+### PROXY
+###
+
+
 class Proxy:
    def __init__(self, cfg):
       self.LOCK = threading.Lock()
@@ -406,8 +507,11 @@ class Proxy:
       self.client_sockets = []
       self.client_commands = {}
 
+      self.unauthenticated_sockets = []
+      self.password = Password()
+
       self.states = [(self.server_sockets, self.handle_line_server),
-                     #(preauth, handle_line_preauth),
+                     (self.unauthenticated_sockets, self.handle_line_auth),
                      (self.client_sockets, self.handle_line_client)]
 
       self.register_command("e", self.do_client_debug)
@@ -527,9 +631,30 @@ class Proxy:
          t_connect = threading.Thread(target = self.do_start_connection, args = [server])
          t_connect.start()
          return True
-
       else:
          return False
+
+   ###
+   ### STATE: unauthenticated client
+   ###
+
+   def handle_line_auth(self, socket, line):
+      assert socket in self.unauthenticated_sockets
+
+      s = line.as_str().replace('\r\n', '').replace('\n', '')
+
+      if self.password.verify(s):
+         while socket in self.unauthenticated_sockets:
+            self.unauthenticated_sockets.remove(socket)
+
+         self.client_sockets.append(socket)
+
+      else:
+         c = self.socket_wrappers[socket]
+         c.tell_err("Incorrect.")
+
+      return True # stop the main loop from going on to state n+1
+
 
    ###
    ### STATE: client
@@ -746,13 +871,11 @@ class Proxy:
 ###
 
 if __name__ == '__main__':
-   cfg = {}
-   try:
-      with open(CONFIG_FILE, 'r') as f:
-         cfg = json.load(f)
-   except FileNotFoundError:
-      logging.error("Configuration file `{}' not found.  Please create it and try again.".format(CONFIG_FILE))
-      exit()
+   cfg = load_json(CONFIG_FILE)
+
+   if cfg is None:
+      logging.error("Must have configuration")
+      exit(1)
 
    proxy = Proxy(cfg)
 
