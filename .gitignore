@@ -1,4 +1,6 @@
 __pycache__
 .*.swp
 config.json
+password.json
+ssl/cert.pem
 logs/*
