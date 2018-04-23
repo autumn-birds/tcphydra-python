@@ -20,6 +20,7 @@ import json
 import os
 import hashlib
 import getpass
+import base64
 
 import pkgutil
 import importlib
@@ -68,13 +69,13 @@ def load_json(filename):
 
 
 def save_json(data, filename):
-    try:
-       with open(filename, 'w') as f:
-          json.dump(data, f, indent=3)
+   try:
+      with open(filename, 'w') as f:
+         json.dump(data, f, indent=3)
 
-    except Exception as e:
-       logging.error("Could not write JSON to file {}".format(filename))
-       raise e
+   except Exception as e:
+      logging.error("Could not write JSON to file {}".format(filename))
+      raise e
 
 
 ###
@@ -100,18 +101,18 @@ class Password:
       self.hashed = load_json(PASSWORD_FILE)
       if self.hashed is None:
          self.prompt_user_for_new_password()
-         save_json(self.hashed, PASSWORD_FILE)
+         print(repr(self.hashed))
+         save_json({k: base64.b64encode(v).decode('ascii') for k, v in self.hashed.items()}, PASSWORD_FILE)
+      else:
+         self.hashed = {k: base64.b64decode(v) for k, v in self.hashed.items()}
 
-   def hash(self, password, seed):
+   def hash(self, password, salt):
       # https://blog.filippo.io/the-scrypt-parameters/ was used for a reference for
       # what these mean and what to set them to.
-      n = 32768
-      r = 8
-      p = 1
-      hashlib.scrypt(password, seed, 32768, 8, 1)
+      return hashlib.scrypt(password.encode('utf8'), salt=salt, n=2 ** 15, r=8, p=1, maxmem=1024 * 1024 * 64)
 
    def prompt_user_for_new_password(self):
-      seed = os.urandom(16)
+      salt = os.urandom(16)
 
       pw = None
       while pw is None:
@@ -121,14 +122,14 @@ class Password:
          if pw_two == pw_one:
             pw = pw_one
 
-      self.hashed = {'seed': seed, 'hash': self.hash(pw, seed)}
+      self.hashed = {'salt': salt, 'hash': self.hash(pw, salt)}
 
    def verify(self, candidate_password):
       if self.hashed is None:
          self.prompt_user_for_new_password()
 
-      candidate = self.hash(candidate_password, self.hashed['seed'])
-      if candidate == self.hash['hash']:
+      candidate = self.hash(candidate_password, self.hashed['salt'])
+      if candidate == self.hashed['hash']:
          return True
       else:
          return False
@@ -797,7 +798,7 @@ class Proxy:
 
             logging.info("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
             self.socket_wrappers[connection] = LocalClient(connection)
-            self.client_sockets += [connection]
+            self.unauthenticated_sockets += [connection]
             self.sel.register(connection, selectors.EVENT_READ)
 
             try:
