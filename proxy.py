@@ -166,13 +166,6 @@ class TextLine:
       else:
          self.__raw = string.encode(self.__enc)
 
-      try:
-         self.parsed = ansi.parse_ANSI(self.as_str())
-         logging.info("Parsed ANSI colors into {} from {}".format(repr(self.parsed), repr(self.as_str())))
-      except ansi.ANSIParsingError as e:
-         logging.warning("Error while trying to parse ANSI colors: {}".format(str(e)))
-         self.parsed = [repr(self.__raw)[1:-1]]    # escapes any ESCs, etc., for you
-
    def as_str(self):
       """Try to 'safely', but lossily, decode the raw line into an ordinary string,
       according to the encoding given."""
