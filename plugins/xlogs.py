@@ -29,7 +29,8 @@ class LoggingFilter:
 
         # (Try to) make sure there's a directory to put logs in.
         directory = os.path.dirname(self.get_new_filename())
-        os.makedirs(directory, exist_ok=True)
+        if directory != "":
+            os.makedirs(directory, exist_ok=True)
 
     def get_new_filename(self):
         return self.filename_template \
@@ -48,9 +49,14 @@ class LoggingFilter:
             self.filehandle = open(self.filename, 'x')
         except FileExistsError:
             logging.error("Can't create logfile {}: it exists".format(self.filename))
+            raise
         except FileNotFoundError:
             # This happens when it can't find the directory to put it in.
             logging.error("Can't create logfile {}: file not found (does the parent directory exist?)")
+            raise
+        except PermissionError:
+            logging.error("Can't create logfile {}: you don't have permission")
+            raise
 
         self.xml = xmlwriter.XmlTagOutputter(indent='   ')
 
