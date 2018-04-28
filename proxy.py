@@ -45,6 +45,9 @@ RECV_MAX = 4096 # bytes
 BIND_TO_HOST = "localhost"
 BIND_TO_PORT = 1234
 
+# We want cfg to be global, but not to load it on module import.
+cfg = None
+
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -107,9 +110,18 @@ class Password:
          self.hashed = {k: base64.b64decode(v) for k, v in self.hashed.items()}
 
    def hash(self, password, salt):
-      # https://blog.filippo.io/the-scrypt-parameters/ was used for a reference for
-      # what these mean and what to set them to.
-      return hashlib.scrypt(password.encode('utf8'), salt=salt, n=2 ** 15, r=8, p=1, maxmem=1024 * 1024 * 64)
+      """This function should return a bytes-like object containing the hash of 'password'
+      given the salt 'salt'."""
+      hashtype = cfg.get('password_hash_method', 'scrypt')
+
+      if hashtype == 'scrypt':
+         # https://blog.filippo.io/the-scrypt-parameters/ was used for a reference for
+         # what these mean and what to set them to.
+         return hashlib.scrypt(password.encode('utf8'), salt=salt, n=2 ** 15, r=8, p=1, maxmem=1024 * 1024 * 64)
+      elif hashtype == 'pbkdf2':
+         return hashlib.pbkdf2_hmac('sha256', password.encode('utf8'), salt, 1000000)
+      else:
+         raise ValueError("Invalid password-hashing method '{}'".format(hashtype))
 
    def prompt_user_for_new_password(self):
       salt = os.urandom(16)
