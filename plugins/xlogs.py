@@ -5,6 +5,8 @@ import datetime
 import time
 import logging
 
+import os
+
 open_logs = []
 
 class LoggingFilter:
@@ -25,10 +27,14 @@ class LoggingFilter:
         except AttributeError:
             self.connection_name = "client"
 
-    def resetfilename(self):
-        self.filename = self.filename_template \
-                        .replace('DATE', time.strftime("%Y-%m-%d_%H%M")) \
-                        .replace('CONNECTION', self.connection_name)
+        # (Try to) make sure there's a directory to put logs in.
+        directory = os.path.dirname(self.get_new_filename())
+        os.makedirs(directory, exist_ok=True)
+
+    def get_new_filename(self):
+        return self.filename_template \
+                   .replace('DATE', time.strftime("%Y-%m-%d_%H%M")) \
+                   .replace('CONNECTION', self.connection_name)
 
     def open(self):
         global open_logs
@@ -36,12 +42,15 @@ class LoggingFilter:
         if self.filehandle is not None:
             raise ValueError("Cannot open log when already open")
 
-        self.resetfilename()
+        self.filename = self.get_new_filename()
 
         try:
             self.filehandle = open(self.filename, 'x')
         except FileExistsError:
-            logging.error("Can't open logfile {}: it exists".format(self.filename))
+            logging.error("Can't create logfile {}: it exists".format(self.filename))
+        except FileNotFoundError:
+            # This happens when it can't find the directory to put it in.
+            logging.error("Can't create logfile {}: file not found (does the parent directory exist?)")
 
         self.xml = xmlwriter.XmlTagOutputter(indent='   ')
 
@@ -130,7 +139,7 @@ class LoggingFilter:
 
     def server_connect(self, connected):
         if connected:
-            self.resetfilename()
+            self.filename = self.get_new_filename()
             self.open()
         else:
             self.close()
