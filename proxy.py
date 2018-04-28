@@ -557,6 +557,15 @@ class Proxy:
       else:
          logging.warning("Note: Attempted to overwrite filter type `{}' failed".format(name))
 
+   def wall(self, mesg):
+      """Warn every client with the string `mesg'."""
+      for socket in self.client_sockets:
+         assert socket in self.socket_wrappers
+         assert type(self.socket_wrappers[socket]) is LocalClient
+
+         c = self.socket_wrappers[socket]
+         c.tell_err(mesg)
+
    ###
    ### STATE: server
    ###
@@ -657,6 +666,9 @@ class Proxy:
       s = line.as_str().replace('\r\n', '').replace('\n', '')
 
       if self.password.verify(s):
+         if cfg.get("warn_about_connections", True):
+            self.wall("A client has authorized itself.")
+
          while socket in self.unauthenticated_sockets:
             self.unauthenticated_sockets.remove(socket)
 
@@ -809,6 +821,10 @@ class Proxy:
                return
 
             logging.info("Accepted {} from {} (mask={}).".format(repr(connection), repr(address), repr(mask)))
+
+            if cfg.get("warn_about_connections", True):
+               self.wall("A client has connected from {}.".format(repr(address)))
+
             self.socket_wrappers[connection] = LocalClient(connection)
             self.unauthenticated_sockets += [connection]
             self.sel.register(connection, selectors.EVENT_READ)

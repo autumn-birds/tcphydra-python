@@ -2,6 +2,7 @@
 	"bind_to_host": "localhost",
 	"bind_to_port": 1234,
 	"password_hash_method": "scrypt",
+	"warn_about_connections": true,
 
 	"filter_servers": [],
 	"filter_clients": [["say_quote_strip",{}]],
