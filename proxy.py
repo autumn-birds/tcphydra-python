@@ -529,6 +529,7 @@ class Proxy:
       self.register_command("join", self.do_client_join)
       self.register_command("h", self.do_client_help)
       self.register_command("help", self.do_client_help)
+      self.register_command("die", self.do_client_stop_everything)
 
       self.cfg = cfg
 
@@ -772,6 +773,11 @@ class Proxy:
 
       for fn, names in cmds.items(): # (k, v)
          client.tell_ok("{}: {}".format(', '.join(names), fn.__doc__ or "No documentation provided."))
+
+   def do_client_stop_everything(self, args, client):
+      """Stop the proxy."""
+      # This is kind of stupid, isn't it?
+      raise KeyboardInterrupt()
 
    ###
    ### MAIN LOOP
