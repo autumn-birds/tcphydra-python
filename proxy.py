@@ -49,7 +49,7 @@ BIND_TO_PORT = 1234
 cfg = None
 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 ###
@@ -240,6 +240,10 @@ class LineBufferingSocketContainer:
             logging.info("Note: BlockingIOError in flush() call")
             break
 
+         except OSError:
+            logging.error("Got an OSError in flush() call")
+            break
+
    def read(self):
       assert self.connected
       assert self.socket != None
@@ -262,6 +266,9 @@ class LineBufferingSocketContainer:
 
       except (BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
          pass
+
+      except OSError:
+         logging.error("Got an OSError in read() call")
 
       except ConnectionResetError:
          has_eof = True
@@ -627,6 +634,9 @@ class Proxy:
 
       except (socket.error, socket.herror, socket.gaierror, socket.timeout) as err:
          server.warn_all("Connection attempt failed, network error: {}".format(repr(err)))
+
+      except OSError as err:
+         server.warn_all("Connection attempt failed, OSError: {}".format(repr(err)))
 
       except Exception:
          kind, value, t = sys.exc_info()
