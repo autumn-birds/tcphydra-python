@@ -527,9 +527,10 @@ class Proxy:
                      (self.unauthenticated_sockets, self.handle_line_auth),
                      (self.client_sockets, self.handle_line_client)]
 
-      self.register_command("e", self.do_client_debug)
-      self.register_command("eval", self.do_client_debug)
-      self.register_command("debug", self.do_client_debug)
+      if cfg.get('debug', False):
+         self.register_command("e", self.do_client_debug)
+         self.register_command("eval", self.do_client_debug)
+         self.register_command("debug", self.do_client_debug)
       self.register_command("J", self.do_client_connect)
       self.register_command("connect", self.do_client_connect)
       self.register_command("j", self.do_client_join)

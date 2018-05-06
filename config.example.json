@@ -7,6 +7,8 @@
 	"filter_servers": [],
 	"filter_clients": [["say_quote_strip",{}]],
 
+	"debug": false,
+
 	"servers": {
 		"secure-host": {
 		   "host": "somewhere.some-mud.net",
