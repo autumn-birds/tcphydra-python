@@ -18,6 +18,8 @@ class MemoryFilter:
 
       histories[self.key].append(line)
 
+      return line
+
 # To show scrollback ...
 def do_recall_scrollback(args, client):
    if client.subscribedTo in histories:
