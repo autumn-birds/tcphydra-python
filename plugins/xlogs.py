@@ -146,8 +146,10 @@ class LoggingFilter:
     def server_connect(self, connected):
         if connected:
             self.filename = self.get_new_filename()
+            logging.info("Opening new log {}".format(self.filename))
             self.open()
         else:
+            logging.warning("Closing log {}".format(self.filename))
             self.close()
 
 def setup(proxy):
