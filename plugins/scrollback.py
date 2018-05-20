@@ -22,6 +22,7 @@ class MemoryFilter:
 
 # To show scrollback ...
 def do_recall_scrollback(args, client):
+   """Print out recent history from the server.  Useful for new connections that are missing context."""
    if client.subscribedTo in histories:
       history = histories[client.subscribedTo].copy()
       while True:
