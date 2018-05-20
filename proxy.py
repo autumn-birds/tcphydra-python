@@ -457,6 +457,9 @@ class LocalClient(FilteredSocket):
    def unsubscribe(self):
       if type(self.subscribedTo) == RemoteServer:
          self.subscribedTo.unsubscribe(self)
+         self.subscribedTo = None
+      else:
+         raise ValueError("client.unsubscribe when subscribedTo not a RemoteServer")
 
    def subscribe(self, other):
       assert type(other) == RemoteServer
@@ -535,9 +538,13 @@ class Proxy:
       self.register_command("connect", self.do_client_connect)
       self.register_command("j", self.do_client_join)
       self.register_command("join", self.do_client_join)
+      self.register_command("drop", self.do_client_drop)
+      self.register_command("d", self.do_client_drop)
+      self.register_command("hush", self.do_client_drop)
       self.register_command("h", self.do_client_help)
       self.register_command("help", self.do_client_help)
       self.register_command("die", self.do_client_stop_everything)
+      self.register_command("D", self.do_client_stop_everything)
 
       self.cfg = cfg
 
@@ -738,7 +745,8 @@ class Proxy:
       assert type(client) == LocalClient
 
       if args in self.servers:
-         client.unsubscribe()
+         if client.subscribedTo is not None:
+            client.unsubscribe()
          self.servers[args].subscribe(client)
          client.subscribe(self.servers[args])
          client.tell_ok("Subscribed to server `{}'.".format(args))
@@ -756,6 +764,16 @@ class Proxy:
          return True #(ish)
       else:
          return False
+
+   def do_client_drop(self, args, client):
+      """Stop listening to the server, but without actually closing the connection to it."""
+      assert type(client) == LocalClient
+
+      try:
+         client.unsubscribe()
+         client.tell_ok("Stopped listening.")
+      except ValueError:
+         client.tell_err("Couldn't stop listening to this; it may be silent already.")
 
    def do_client_debug(self, args, client):
       """Supply a Python expression to eval() for debugging purposes."""
@@ -932,10 +950,10 @@ if __name__ == '__main__':
       except Exception:
          kind, value, traceback = sys.exc_info()
          logging.error("Error loading plugin {}: {}".format(plugin, repr(value)))
-         print("-------------------- TRACEBACK:")
-         print(traceback.format_exc())
+         #print("-------------------- TRACEBACK:")
+         #print(traceback.format_exc())
          if plugin_err_fatal:
-            exit()
+            raise value
 
    try:
       proxy.run()
