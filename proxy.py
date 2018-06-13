@@ -111,7 +111,7 @@ class Password:
 
    def hash(self, password, salt):
       """This function should return a bytes-like object containing the hash of 'password'
-      given the salt 'salt'."""
+      given the salt 'salt'.  The password argument should be a string."""
       hashtype = cfg.get('password_hash_method', 'scrypt')
 
       if hashtype == 'scrypt':
@@ -124,6 +124,7 @@ class Password:
          raise ValueError("Invalid password-hashing method '{}'".format(hashtype))
 
    def prompt_user_for_new_password(self):
+      """Prompt the user for a new password on the console and setup self to verify it later."""
       salt = os.urandom(16)
 
       pw = None
@@ -137,8 +138,9 @@ class Password:
       self.hashed = {'salt': salt, 'hash': self.hash(pw, salt)}
 
    def verify(self, candidate_password):
+      """Check `candidate_password' (a string) against self; return whether it's right."""
       if self.hashed is None:
-         self.prompt_user_for_new_password()
+         raise ValueError("Tried to check a password that doesn't exist.")
 
       candidate = self.hash(candidate_password, self.hashed['salt'])
       if candidate == self.hashed['hash']:
@@ -153,6 +155,8 @@ class Password:
 
 
 class TextLine:
+   """An abstract container for lines of text.  This seemed like an important
+   design element at one point, but it may not be nearly as important now."""
    def __init__(self, string, encoding):
       assert type(string) == bytes or type(string) == str
       self.__enc = encoding
@@ -191,6 +195,10 @@ class TextLine:
 
 
 class LineBufferingSocketContainer:
+   """A base class that helps handle reading from and writing to a socket.  The
+   I/O is buffered to lines, and telnet control codes (i.e. IAC ...) are dropped.
+   (Thus this class only works with servers that are willing to play dumb.  But
+   that's most servers, luckily for us.)"""
    def __init__(self, socket = None):
       self.__b_send_buffer = b''
       self.__b_recv_buffer = b''
@@ -206,6 +214,7 @@ class LineBufferingSocketContainer:
          self.attach_socket(socket)
 
    def write_str(self, data):
+      """Write a string to the underlying socket."""
       assert type(data) == str
 
       self.__b_send_buffer += data.encode(self.encoding)
@@ -213,6 +222,7 @@ class LineBufferingSocketContainer:
       self.flush()
 
    def write_line(self, line):
+      """Write a TextLine to the underlying socket."""
       assert type(line) == TextLine
 
       self.__b_send_buffer += line.as_bytes()
@@ -220,6 +230,7 @@ class LineBufferingSocketContainer:
       self.flush()
 
    def write(self, data):
+      """Write some bytes to the underlying socket."""
       assert type(data) == bytes
 
       self.__b_send_buffer += data
@@ -227,6 +238,8 @@ class LineBufferingSocketContainer:
       self.flush()
 
    def flush(self):
+      """Send as much buffered input as the socket will allow, but only attempt to
+      do so up to the end of the last complete line."""
       assert self.socket != None
       assert self.connected
 
@@ -245,6 +258,8 @@ class LineBufferingSocketContainer:
             break
 
    def read(self):
+      """Read as much data as the socket will provide.  Returns a pair like `([list of TextLine's or empty],
+      found_eof?)'.  If found_eof? is true, the connection has probably died."""
       assert self.connected
       assert self.socket != None
 
@@ -331,20 +346,27 @@ class LineBufferingSocketContainer:
       return (q, has_eof)
 
    def attach_socket(self, socket):
+      """Set up `self' to work with `socket'."""
       socket.setblocking(False)
       self.socket = socket
       self.connected = True
 
    def handle_disconnect(self):
+      """Call this function when the remote end closed the connection to nullify and
+      make false the appropriate variables."""
       self.socket = None
       self.connected = False
 
 
 class FilterSpecificationError(Exception):
+   """This Exception subclass is thrown when the user has made an errror specifying a
+   filter or paramters for setting up said filter."""
    pass
 
 
 class FilteredSocket(LineBufferingSocketContainer):
+   """This class mostly extends LineBufferingSocketContainer with a list of filters and
+   logic for setting it up from a specification."""
    # Doesn't actually filter *itself* (yet?)
    # Would probably need to override some methods of the parent class.
    # (It may be impracticable to self-filter here anyway because the filters need to
@@ -379,6 +401,7 @@ class FilteredSocket(LineBufferingSocketContainer):
 
 
 class RemoteServer(FilteredSocket):
+   """Handles a connection to a remote server, something multiple clients can connect to."""
    def __init__(self, host, port, name=""):
       super().__init__()
 
@@ -396,11 +419,12 @@ class RemoteServer(FilteredSocket):
       self.use_SSL = False
 
    def handle_data(self, data):
+      """Called when some data has arrived and needs to be dispatched to the subscribers."""
       for sub in self.subscribers:
          sub.write_line(data)
 
    def attach_socket(self, socket):
-      # Overridden to notify things when a server is connected.
+      """Set up to use socket `socket'.  Overridden to notify any filters when a server is connected."""
       super().attach_socket(socket)
 
       for f in self.filters:
@@ -410,6 +434,7 @@ class RemoteServer(FilteredSocket):
             pass
 
    def handle_disconnect(self):
+      """Called when the connection has been lost."""
       super().handle_disconnect()
       for sub in self.subscribers:
          sub.tell_err("Remote server closed connection.")
@@ -421,21 +446,25 @@ class RemoteServer(FilteredSocket):
             pass
 
    def subscribe(self, supplicant):
+      """Add `supplicant' to the list of subscribed clients."""
       assert type(supplicant) == LocalClient
       if supplicant not in self.subscribers:
          self.subscribers.append(supplicant)
 
    def unsubscribe(self, supplicant):
+      """Remove `supplicant' from the list of subscribed clients."""
       assert type(supplicant) == LocalClient
       while supplicant in self.subscribers:
          self.subscribers.remove(supplicant)
 
    def tell_all(self, msg):
+      """Tell all the clients subscribed to this particular server of something."""
       assert type(msg) == str
       for sub in self.subscribers:
          sub.tell_ok(msg)
 
    def warn_all(self, msg):
+      """Warn all the clients subscribed to this particular server about something."""
       assert type(msg) == str
       for sub in self.subscribers:
          sub.tell_err(msg)
