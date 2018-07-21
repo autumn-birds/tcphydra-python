@@ -6,7 +6,7 @@ It also lets you write and use plugins to do fancier stuff.
 $ cp config.example.json config.json
 $ nano config.json
 $ cd ssl; ./gen_keys.sh; cd ..
-$ python3 proxy.py
+$ ./start.sh
 ```
 
 You must provide at least an item of information (country code or an arbitrary organization name both work) to create the self-signed SSL certificate, but you can make all the other fields blank.
@@ -15,7 +15,7 @@ This code runs on Python 3.6.  Older versions may not work.  Python 3.4 does not
 
 ## copyright
 
-There is currently no license, open source or otherwise.
+There is currently no license, open source or otherwise.  **This does not mean you may use or modify the code in your project.**
 
 ## setup as a systemd service
 
@@ -36,7 +36,7 @@ $ cp config.example.json config.json
            ( edit your configuration file, or copy in an existing one instead )
 $ cd ssl; sh gen-keys.sh; cd ..
            ( input details; you need at least one piece of information here )
-$ python3 proxy.py
+$ ./start.sh
            ( first run requires you to create a password keyboard-interactively; kill the proxy with ^C afterwards )
 $ exit
 ```
@@ -52,7 +52,7 @@ Type=simple
 User=tcphydra
 Group=tcphydra
 WorkingDirectory=/home/tcphydra
-ExecStart=/usr/bin/python3 /home/tcphydra/proxy.py
+ExecStart=/home/tcphydra/start.sh
 
 [Install]
 WantedBy=multi-user.target
