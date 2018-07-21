@@ -1,5 +1,7 @@
 # Plugins
 
+**NB: This file isn't really documentation as much as it is a clumsy attempt at figuring out how this would work before I implemented it. Not saying the current way works better, but the code itself calls some things by different names and in general is not described by the below.**
+
 An extension mechanism.
 
 If connecting from multiple places is the most useful part of running a proxy, this might be the other most useful part -- being able to easily write code that interacts with the connections.
@@ -12,7 +14,7 @@ If connecting from multiple places is the most useful part of running a proxy, t
   - Be able to assign this per-client (e.g. hide certain lines, but only in this window.)
 - Intercept text coming from client(s) and act on and/or mutate it.
   - Use cases: automate typing boring bits, tweak/add command syntax, etc.
-- Register new commands, callable by any client, which run arbitrary Python code with access to the client and its current server connection if any (and/or the entire plugin interface if applicable.
+- Register new commands, callable by any client, which run arbitrary Python code with access to the client and its current server connection if any (and/or the entire plugin interface if applicable.)
 
 ## Design
 
