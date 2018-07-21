@@ -13,6 +13,8 @@ You must provide at least an item of information (country code or an arbitrary o
 
 This code runs on Python 3.6.  Older versions may not work.  Python 3.4 does not work.
 
+If you find yourself unable to use because `scrypt` is missing, you can change that value to `pbkdf2` in `config.json`.
+
 ## copyright
 
 There is currently no license, open source or otherwise.  **This does not mean you may use or modify the code in your project.**
