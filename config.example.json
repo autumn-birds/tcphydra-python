@@ -1,28 +1,35 @@
 {
-	"bind_to_host": "localhost",
-	"bind_to_port": 1234,
-	"password_hash_method": "scrypt",
-	"warn_about_connections": true,
+    "bind_to_host": "localhost",
+    "bind_to_port": 1234,
+    "password_hash_method": "scrypt",
+    "warn_about_connections": true,
 
-	"filter_servers": [],
-	"filter_clients": [["say_quote_strip",{}]],
+    "filter_servers": [
+        ["xlogs",{"filename":"logs/CONNECTION-DATE.xlog.xml"}],
+        ["scrollback",{"length":100}]
+    ],
 
-	"debug": false,
+    "filter_clients": [
+        ["say_quote_strip",{}],
+        ["no_curly_quotes",{}]
+    ],
 
-	"servers": {
-		"secure-host": {
-		   "host": "somewhere.some-mud.net",
-		   "port": 9090,
-		   "ssl": true
-		},
-		"insecure-host": {
-		   "host": "somewhere-else.some-mud.net",
-		   "port": 1055
-		},
-		"local": {
-		   "host": "localhost",
+    "debug": false,
+
+    "servers": {
+        "secure-host": {
+           "host": "somewhere.some-mud.net",
+           "port": 9090,
+           "ssl": true
+        },
+        "insecure-host": {
+           "host": "somewhere-else.some-mud.net",
+           "port": 1055
+        },
+        "local": {
+           "host": "localhost",
                    "port": 4000,
-		   "filters": [["test",{"nonsense":"this should only be loaded once"}]]
-		}
-	}
+           "filters": [["test",{"nonsense":"this should only be loaded once"}]]
+        }
+    }
 }
