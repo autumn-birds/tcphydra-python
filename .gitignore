@@ -4,3 +4,4 @@ config.json
 password.json
 ssl/cert.pem
 logs/*
+.vagrant/*
