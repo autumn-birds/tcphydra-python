@@ -11,6 +11,7 @@ Vagrant.configure("2") do |config|
     config.vm.box_check_update = true
     config.vm.network "forwarded_port", guest: 8080, host: 8080, host_ip: "127.0.0.1"
     
+    # Runs once, to install dependencies and system service:
     config.vm.provision "shell", inline: <<-SHELL
         apt-get update
         apt-get install -y git python3 python3-pip tf5
@@ -23,8 +24,15 @@ if [[ ! -f ssl/cert.pem ]]; then
   cd ssl; ./gen_keys.sh; cd ..
 fi
 EOF
+    SHELL
+    
+    # Runs every load.  We do it this way because /vagrant isn't mounted on boot
+    # when systemctl enable inside the VM would start it.
+    config.vm.provision "shell", run: "always", inline: <<-SHELL
+        SERVICES_DIR=/etc/systemd/system
         
-        cat >/etc/systemd/system/tcphydra.service <<EOF
+        if [[ ! -f $SERVICES_DIR/tcphydra.service ]]; then
+            cat >$SERVICES_DIR/tcphydra.service <<EOF
 [Unit]
 Description=TCP line proxy
 
@@ -38,10 +46,13 @@ ExecStart=/bin/bash /vagrant/start.sh
 [Install]
 WantedBy=multi-user.target
 EOF
+        fi
 
-        systemctl enable tcphydra
+        if [[ ! -f /vagrant/password.json ]]; then
+            echo "[!!!!] MANUAL INTERVENTION REQUIRED: You need to run the proxy once by hand (in `vagrant ssh`) to set a password.  It won't be started automatically until you do."
+            exit
+        fi
         
-        echo "[!!!!!] Service for proxy installed. You must reboot the VM or start the service by hand for it to take effect."
-        echo "[!!!!!] If there is no password.json in the main directory, you must run the proxy once by hand to ensure a password file is generated. (Use ./start.sh in /vagrant after vagrant ssh.)"
+        systemctl start tcphydra.service
     SHELL
 end
