@@ -7,9 +7,10 @@ Vagrant.configure("2") do |config|
     # sense.  But we need shared folders.  Fortunately they provide a box that will
     # help out with that:
     config.vm.box = "debian/contrib-testing64"
-    
     config.vm.box_check_update = true
-    config.vm.network "forwarded_port", guest: 8080, host: 8080, host_ip: "127.0.0.1"
+
+    # Change the host: port to where you want to connect into the proxy from outside
+    config.vm.network "forwarded_port", guest: 1234, host: 8080, host_ip: "127.0.0.1"
     
     # Runs once, to install dependencies and system service:
     config.vm.provision "shell", inline: <<-SHELL
@@ -49,7 +50,7 @@ EOF
         fi
 
         if [[ ! -f /vagrant/password.json ]]; then
-            echo "[!!!!] MANUAL INTERVENTION REQUIRED: You need to run the proxy once by hand (in `vagrant ssh`) to set a password.  It won't be started automatically until you do."
+            echo "[!!!!] MANUAL INTERVENTION REQUIRED: You need to run the proxy once by hand (in `vagrant ssh`) to set a password.  It won't be started automatically until you do.  `sudo systemctl start tcphydra.service` in the VM to run it in the background."
             exit
         fi
         
