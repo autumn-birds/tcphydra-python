@@ -19,6 +19,10 @@ If you find yourself unable to use because `scrypt` is missing, you can change t
 
 There is currently no license, open source or otherwise.  **This does not mean you may use or modify the code in your project.**
 
+## with vagrant
+
+There is a `Vagrantfile`.  It requires some manual intervention on the first run; *if* everything is working properly it should warn you about that.  I won't claim it's not fragile to changes in external systems or services but it *seems* to work properly.
+
 ## setup as a systemd service
 
 You can use `systemctl show --property=UnitPath` to tell where systemd loads unit files from, which may be useful as a debug measure. The standard location for sysadmins to place their files is `/etc/systemd/system/` according to [ArchWiki](https://wiki.archlinux.org/index.php/Systemd#Writing_unit_files).
